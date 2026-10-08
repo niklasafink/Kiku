@@ -21,6 +21,8 @@ export async function POST(request: Request) {
   try {
     const { text } = await generateText({
       model: openrouter()(TRANSCRIBE_MODEL),
+      // Writing down what was said needs no thinking; left on, it is most of the cost of a transcript.
+      providerOptions: { openrouter: { reasoning: { effort: "minimal" } } },
       messages: [
         {
           role: "user",

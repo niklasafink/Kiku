@@ -126,6 +126,11 @@ body {
     box-shadow 120ms ease-out,
     border-color 120ms ease-out;
 }
+/* The one tile to look at first, e.g. the recommended plan. */
+.tile-primary {
+  border-color: var(--color-primary);
+  box-shadow: 0 3px 0 var(--color-primary);
+}
 @media (hover: hover) {
   a.tile:hover {
     transform: translateY(-2px);

@@ -288,7 +288,7 @@ describe("mcp server", () => {
       `Bearer ${token}`,
     );
     expect(init.status).toBe(200);
-    expect((await init.json()).result.serverInfo.name).toBe("karteikarten");
+    expect((await init.json()).result.serverInfo.name).toBe("kiku");
 
     // No session is kept between requests: a tool call works on its own.
     const response = await post(call, `Bearer ${token}`);

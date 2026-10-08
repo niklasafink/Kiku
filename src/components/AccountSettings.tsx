@@ -110,7 +110,7 @@ function McpSection() {
     await load();
   }
 
-  const command = `claude mcp add --transport http karteikarten ${endpoint} --header "Authorization: Bearer ${fresh ?? "DEIN_TOKEN"}"`;
+  const command = `claude mcp add --transport http kiku ${endpoint} --header "Authorization: Bearer ${fresh ?? "DEIN_TOKEN"}"`;
 
   return (
     <section className="tile flex flex-col gap-4 p-5">

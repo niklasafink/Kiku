@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Karteikarten",
-    short_name: "Karteikarten",
+    name: "Kiku",
+    short_name: "Kiku",
     description: "Karteikarten lernen mit KI-Abgleich deiner Antwort.",
     start_url: "/",
     display: "standalone",

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CloudAlert, CloudCheck, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
+import { CloudAlert, CloudCheck, Globe, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
 import { AccountProvider, useAccount, useSyncState } from "@/components/Account";
 import { useFolders } from "@/lib/hooks";
 import { childrenOf } from "@/lib/tree";
@@ -77,19 +77,26 @@ function Shell({ children }: { children: ReactNode }) {
   const onAuthPage = pathname.startsWith("/auth/");
   const signedOut = account.mode === "server" && account.status === "signedOut";
   const signedIn = account.mode === "server" && account.status === "signedIn";
+  // Open to visitors: pricing, imprint, and "/" as the homepage until someone is signed in.
+  // "/home" is the same homepage for people who are signed in.
+  const onPublicPage =
+    pathname === "/pricing" ||
+    pathname === "/impressum" ||
+    pathname === "/home" ||
+    (pathname === "/" && account.mode === "server" && !signedIn);
 
   // With accounts enabled the library is only available after signing in.
   useEffect(() => {
-    if (signedOut && !onAuthPage) router.replace("/auth/sign-in");
+    if (signedOut && !onAuthPage && !onPublicPage) router.replace("/auth/sign-in");
     // Nothing to sign in to once you are in, or when the app runs without accounts.
     if ((signedIn || account.mode === "local") && onAuthPage) router.replace("/");
-  }, [signedOut, signedIn, account.mode, onAuthPage, router]);
+  }, [signedOut, signedIn, account.mode, onAuthPage, onPublicPage, router]);
 
   const folders = useFolders() ?? [];
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
 
-  if (onAuthPage) return <>{children}</>;
+  if (onAuthPage || onPublicPage) return <>{children}</>;
   if (account.mode === "server" && account.status !== "signedIn") {
     return <div className="grid min-h-dvh place-items-center bg-base-200"><span className="loading loading-spinner loading-lg" aria-label="Lädt" /></div>;
   }
@@ -109,7 +116,7 @@ function Shell({ children }: { children: ReactNode }) {
             <Menu />
           </label>
           <Link href="/" className="px-2 text-lg font-extrabold">
-            Karteikarten
+            Kiku
           </Link>
         </header>
         <main className="mx-auto w-full max-w-[110rem] flex-1 px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-6 lg:px-8">
@@ -119,10 +126,23 @@ function Shell({ children }: { children: ReactNode }) {
       <div className="drawer-side z-40">
         <label htmlFor="nav-drawer" aria-label="Menü schließen" className="drawer-overlay" />
         <nav className="flex min-h-full w-64 flex-col gap-2 border-r-2 border-base-300 bg-base-100 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
-          <Link href="/" onClick={close} className="mb-2 flex items-center gap-2 px-2 py-1 text-xl font-black">
-            <span className="grid size-9 place-items-center rounded-field bg-primary text-primary-content">✓</span>
-            Karteikarten
-          </Link>
+          <div className="mb-2 flex items-center gap-1">
+            <Link href="/" onClick={close} className="mr-auto flex items-center gap-2 px-2 py-1 text-xl font-black">
+              <span className="grid size-9 place-items-center rounded-field bg-primary text-primary-content">✓</span>
+              Kiku
+            </Link>
+            {account.mode === "server" && (
+              <Link
+                href="/home"
+                onClick={close}
+                className="btn btn-ghost btn-square btn-sm opacity-50 hover:opacity-100"
+                aria-label="Zur Homepage"
+                title="Zur Homepage"
+              >
+                <Globe className="size-4" />
+              </Link>
+            )}
+          </div>
           <ul className="menu w-full flex-1 p-0 font-semibold">
             <li>
               <Link href="/" onClick={close} className={pathname === "/" ? "menu-active" : ""}>

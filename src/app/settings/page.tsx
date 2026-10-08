@@ -49,7 +49,7 @@ export default function SettingsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `karteikarten-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `kiku-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
   }

@@ -10,9 +10,9 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "Karteikarten",
+  title: "Kiku",
   description: "Karteikarten lernen: Antwort sprechen oder tippen, KI gleicht mit deiner Lösung ab.",
-  appleWebApp: { capable: true, title: "Karteikarten", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "Kiku", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {

@@ -1,4 +1,4 @@
-# Karteikarten
+# Kiku
 
 A deliberately simple flashcard web app with one twist: you store your own solution for each
 card, answer by **speaking or typing**, and an AI marks which parts of your solution you
@@ -78,7 +78,9 @@ grading, and the audio recording for transcription.
    (see `.env.example`). With the Neon CLI linked to the project, `neon env pull` writes the
    first two.
 3. Create the tables: `pnpm db:migrate`
-4. Start the app. It now asks you to sign in.
+4. Start the app with `pnpm dev:https` and open the `https://` address. It now asks you to sign in.
+   The session cookie is a secure cookie; over plain `http://` some browsers (Safari) do not
+   keep it, and the sign-in then appears to do nothing.
 
 Data you created in local mode before your first sign-in on a device is added to your account.
 Signing out removes the local copy from that device; the library stays in the account.
@@ -103,7 +105,7 @@ notes into flashcards. Changes show up in the app on the next sync.
 2. Connect your client. For Claude Code:
 
    ```bash
-   claude mcp add --transport http karteikarten https://your-host/api/mcp \
+   claude mcp add --transport http kiku https://your-host/api/mcp \
      --header "Authorization: Bearer kk_..."
    ```
 

@@ -11,7 +11,7 @@ const WRITE = { readOnlyHint: false, destructiveHint: false };
 const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true };
 
 export function createMcpServer(db: Database, userId: string): McpServer {
-  const server = new McpServer({ name: "karteikarten", version: "1.0.0" });
+  const server = new McpServer({ name: "kiku", version: "1.0.0" });
 
   // Known problems (unknown id, invalid move) go back to the assistant as a tool error it can act on.
   const run = async (action: () => Promise<unknown>) => {

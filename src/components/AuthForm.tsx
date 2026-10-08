@@ -5,6 +5,23 @@ import { useState, type FormEvent } from "react";
 import { useAccount } from "@/components/Account";
 import { authClient } from "@/lib/authClient";
 
+/** Turns an auth failure (returned or thrown by the client) into a message for the user. */
+function describeFailure(failure: unknown, signUp: boolean): string {
+  if (failure instanceof TypeError) return "Der Server ist nicht erreichbar. Bitte versuche es noch einmal.";
+  const { code, message, status } = (failure ?? {}) as { code?: string; message?: string; status?: number };
+  const text = `${code ?? ""} ${message ?? ""}`.toLowerCase();
+  if (text.includes("already_exists") || text.includes("already exists")) {
+    return "Für diese E-Mail-Adresse gibt es schon ein Konto. Melde dich stattdessen an.";
+  }
+  if (text.includes("invalid_email_or_password") || text.includes("invalid email or password") || status === 401) {
+    return "E-Mail oder Passwort stimmt nicht.";
+  }
+  if (text.includes("password") && (text.includes("short") || text.includes("weak"))) {
+    return "Das Passwort ist zu kurz oder zu schwach.";
+  }
+  return message || (signUp ? "Das Konto konnte nicht angelegt werden." : "Anmeldung fehlgeschlagen.");
+}
+
 /** Sign-in and sign-up share one form; sign-up only adds the name field. */
 export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
   const account = useAccount();
@@ -22,22 +39,34 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
     setError(null);
     setNotice(null);
     try {
-      const { error: failure } = signUp
+      const { data, error: failure } = signUp
         ? await authClient.signUp.email({ name: name.trim() || email.split("@")[0], email, password })
         : await authClient.signIn.email({ email, password });
       if (failure) {
-        setError(failure.message || (signUp ? "Das Konto konnte nicht angelegt werden." : "Anmeldung fehlgeschlagen."));
+        setError(describeFailure(failure, signUp));
         return;
       }
 
       // Once the session is known the shell moves on to the library by itself.
       const signedIn = account.mode === "server" ? await account.refresh() : null;
-      if (!signedIn) {
+      if (signedIn) return;
+
+      if (data?.token) {
+        // The server accepted the login, but the browser did not keep the session cookie.
+        // It is a "Secure" cookie, which some browsers (Safari) only store over https.
+        setError(
+          window.location.protocol === "https:"
+            ? "Die Anmeldung war erfolgreich, aber dein Browser hat die Sitzung nicht gespeichert. Bitte erlaube Cookies für diese Seite."
+            : "Die Anmeldung war erfolgreich, aber dein Browser speichert die Sitzung nur über eine sichere Verbindung. Öffne die App über https:// statt http://.",
+        );
+      } else {
         // Account exists but there is no session yet: the e-mail address has to be confirmed first.
-        setNotice("Fast geschafft: Bitte bestätige deine E-Mail-Adresse über die Nachricht, die wir dir geschickt haben, und melde dich dann an.");
+        setNotice(
+          "Fast geschafft: Bitte bestätige deine E-Mail-Adresse über die Nachricht, die wir dir geschickt haben, und melde dich dann an.",
+        );
       }
-    } catch {
-      setError("Der Server ist nicht erreichbar. Bitte versuche es noch einmal.");
+    } catch (failure) {
+      setError(describeFailure(failure, signUp));
     } finally {
       setPending(false);
     }
@@ -48,7 +77,7 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
       <form onSubmit={handleSubmit} className="tile pop-in flex w-full max-w-sm flex-col gap-4 p-6">
         <div className="flex items-center gap-2 text-xl font-black">
           <span className="grid size-9 place-items-center rounded-field bg-primary text-primary-content">✓</span>
-          Karteikarten
+          Kiku
         </div>
         <h1 className="text-2xl font-black">{signUp ? "Konto anlegen" : "Anmelden"}</h1>
 
