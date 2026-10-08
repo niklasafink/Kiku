@@ -10,7 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/migrate.mts"
+    "db:migrate": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/migrate.ts",
+    "dev:https": "next dev --experimental-https"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
