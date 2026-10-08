@@ -46,3 +46,5 @@ next-env.d.ts
 .neon
 
 certificates
+# marketing website (homepage, pricing, imprint, demo); kept out of the public repo
+/src/app/(website)/

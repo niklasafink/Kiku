@@ -66,3 +66,10 @@ export const apiTokens = pgTable(
   },
   (t) => [index("api_tokens_user").on(t.userId)],
 );
+
+/** Daily counters of the public demo on the homepage. The id is a hash, no IP address is stored. */
+export const demoUsage = pgTable("demo_usage", {
+  id: text("id").primaryKey(),
+  day: text("day").notNull(),
+  count: integer("count").notNull(),
+});

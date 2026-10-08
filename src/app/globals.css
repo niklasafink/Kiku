@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* The website folder is git-ignored, which would hide its classes from Tailwind. */
+@source "./(website)";
 
 @plugin "daisyui" {
   themes: false;
@@ -81,6 +83,10 @@
 /* Slightly smaller base size so more fits on screen; everything is rem-based. */
 html {
   font-size: 15px;
+}
+/* The public website keeps the browser default, so its type sizes match remnote.com 1:1. */
+html:has(.website) {
+  font-size: 16px;
 }
 
 body {

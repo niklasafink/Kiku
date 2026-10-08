@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { useAccount } from "@/components/Account";
 import { authClient } from "@/lib/authClient";
+import { KikuMark } from "@/components/KikuMark";
 
 /** Turns an auth failure (returned or thrown by the client) into a message for the user. */
 function describeFailure(failure: unknown, signUp: boolean): string {
@@ -76,7 +77,7 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
     <div className="grid min-h-dvh place-items-center bg-base-200 p-4">
       <form onSubmit={handleSubmit} className="tile pop-in flex w-full max-w-sm flex-col gap-4 p-6">
         <div className="flex items-center gap-2 text-xl font-black">
-          <span className="grid size-9 place-items-center rounded-field bg-primary text-primary-content">✓</span>
+          <KikuMark className="size-9" />
           Kiku
         </div>
         <h1 className="text-2xl font-black">{signUp ? "Konto anlegen" : "Anmelden"}</h1>

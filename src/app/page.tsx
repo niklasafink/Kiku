@@ -1,5 +1,7 @@
 import { Home } from "@/components/Home";
-import { Landing } from "@/components/Landing";
+// The marketing website lives in src/app/(website), outside the repository; without it
+// the import falls back to src/websiteFallback.
+import { Landing } from "@website/Landing";
 import { currentUser, SERVER_MODE } from "@/server/auth";
 
 export default async function HomePage() {

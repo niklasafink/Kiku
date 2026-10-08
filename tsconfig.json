@@ -19,6 +19,7 @@
       }
     ],
     "paths": {
+      "@website/*": ["./src/app/(website)/_components/*", "./src/websiteFallback/*"],
       "@/*": ["./src/*"]
     }
   },

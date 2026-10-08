@@ -10,11 +10,16 @@ const MAX_SECONDS = 30 * 60;
 
 type Phase = "idle" | "starting" | "recording" | "transcribing";
 
-async function transcribe(chunks: Float32Array[], sampleRate: number, signal: AbortSignal): Promise<string> {
+async function transcribe(
+  endpoint: string,
+  chunks: Float32Array[],
+  sampleRate: number,
+  signal: AbortSignal,
+): Promise<string> {
   const wav = await pcmToWav(chunks, sampleRate);
   for (let attempt = 0; ; attempt++) {
     try {
-      const response = await fetch("/api/transcribe", {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "audio/wav" },
         body: wav,
@@ -30,7 +35,18 @@ async function transcribe(chunks: Float32Array[], sampleRate: number, signal: Ab
 }
 
 /** Records from the microphone and hands back the AI transcript. */
-export function Recorder({ onTranscript, disabled }: { onTranscript: (text: string) => void; disabled?: boolean }) {
+export function Recorder({
+  onTranscript,
+  disabled,
+  endpoint = "/api/transcribe",
+  compact = false,
+}: {
+  onTranscript: (text: string) => void;
+  disabled?: boolean;
+  endpoint?: string;
+  /** Smaller button with a short status line, for sitting beside a text field. */
+  compact?: boolean;
+}) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +103,7 @@ export function Recorder({ onTranscript, disabled }: { onTranscript: (text: stri
     const segmenter = createSegmenter(audioContext.sampleRate, (chunks) => {
       const position = pending.length;
       pending.push(
-        transcribe(chunks, audioContext.sampleRate, abort.signal).then(
+        transcribe(endpoint, chunks, audioContext.sampleRate, abort.signal).then(
           (text) => {
             parts[position] = text;
           },
@@ -161,35 +177,36 @@ export function Recorder({ onTranscript, disabled }: { onTranscript: (text: stri
   }
 
   const busy = phase === "starting" || phase === "transcribing";
+  const size = compact ? "size-12" : "size-16";
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className={`flex flex-col items-center ${compact ? "w-20 gap-1.5" : "gap-3"}`}>
       {phase === "recording" ? (
         <button
           type="button"
           onClick={() => stopRef.current()}
-          className="relative grid size-16 place-items-center rounded-full bg-error text-error-content"
+          className={`relative grid ${size} place-items-center rounded-full bg-error text-error-content`}
           aria-label="Aufnahme beenden"
         >
           <span ref={ringRef} className="absolute inset-0 rounded-full bg-error/30 transition-transform duration-100" aria-hidden />
-          <Square className="relative size-6" fill="currentColor" />
+          <Square className={compact ? "relative size-4" : "relative size-6"} fill="currentColor" />
         </button>
       ) : (
         <button
           type="button"
           onClick={start}
           disabled={disabled || busy}
-          className="btn btn-primary btn-circle btn-chunky size-16"
+          className={`btn btn-primary btn-circle btn-chunky ${size}`}
           aria-label="Antwort einsprechen"
         >
-          {busy ? <span className="loading loading-spinner loading-lg" /> : <Mic className="size-7" />}
+          {busy ? <span className={`loading loading-spinner ${compact ? "loading-md" : "loading-lg"}`} /> : <Mic className={compact ? "size-5" : "size-7"} />}
         </button>
       )}
 
-      <p className="min-h-6 text-sm font-bold" aria-live="polite">
+      <p className={compact ? "text-center text-[11px] leading-tight font-bold" : "min-h-6 text-sm font-bold"} aria-live="polite">
         {(phase === "idle" || phase === "starting") && <span className="opacity-70">Antwort einsprechen</span>}
-        {phase === "recording" && <span className="tabular-nums">Aufnahme läuft · {formatDuration(seconds)}</span>}
-        {phase === "transcribing" && <span className="opacity-70">Wird transkribiert …</span>}
+        {phase === "recording" && <span className="tabular-nums">{compact ? formatDuration(seconds) : `Aufnahme läuft · ${formatDuration(seconds)}`}</span>}
+        {phase === "transcribing" && <span className="opacity-70">{compact ? "Transkribiert …" : "Wird transkribiert …"}</span>}
       </p>
 
       {error && (

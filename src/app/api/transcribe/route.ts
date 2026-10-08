@@ -1,6 +1,6 @@
-import { generateText } from "ai";
-import { errorResponse, openrouter, TRANSCRIBE_MODEL } from "@/lib/ai";
+import { errorResponse } from "@/lib/ai";
 import { denyIfSignedOut } from "@/server/auth";
+import { transcribeAudio } from "@/server/transcribe";
 
 // 16 kHz mono 16-bit WAV is ~32 KB/s. The client cuts long recordings into pieces of at most
 // a minute (~2 MB), so every request stays below typical 4.5 MB body limits.
@@ -19,24 +19,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { text } = await generateText({
-      model: openrouter()(TRANSCRIBE_MODEL),
-      // Writing down what was said needs no thinking; left on, it is most of the cost of a transcript.
-      providerOptions: { openrouter: { reasoning: { effort: "minimal" } } },
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Transkribiere diese Aufnahme wörtlich. Die Sprache ist in der Regel Deutsch, Fachbegriffe können aus anderen Sprachen stammen. Gib ausschließlich das Transkript aus, ohne Einleitung, Anführungszeichen oder Kommentar. Wenn nichts Verständliches gesagt wird, antworte mit einer leeren Nachricht.",
-            },
-            { type: "file", mediaType: "audio/wav", data: audio },
-          ],
-        },
-      ],
-    });
-    return Response.json({ text: text.trim() });
+    return Response.json({ text: await transcribeAudio(audio) });
   } catch (error) {
     return errorResponse(error);
   }

@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CloudAlert, CloudCheck, Globe, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
+import { CloudAlert, CloudCheck, House, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
 import { AccountProvider, useAccount, useSyncState } from "@/components/Account";
 import { useFolders } from "@/lib/hooks";
 import { childrenOf } from "@/lib/tree";
 import type { Folder } from "@/lib/types";
+import { KikuMark } from "@/components/KikuMark";
 
 function TreeNode({
   folder,
@@ -77,11 +78,13 @@ function Shell({ children }: { children: ReactNode }) {
   const onAuthPage = pathname.startsWith("/auth/");
   const signedOut = account.mode === "server" && account.status === "signedOut";
   const signedIn = account.mode === "server" && account.status === "signedIn";
-  // Open to visitors: pricing, imprint, and "/" as the homepage until someone is signed in.
+  // Open to visitors: pricing, the legal pages, and "/" as the homepage until someone is signed in.
   // "/home" is the same homepage for people who are signed in.
   const onPublicPage =
     pathname === "/pricing" ||
     pathname === "/impressum" ||
+    pathname === "/datenschutz" ||
+    pathname === "/agb" ||
     pathname === "/home" ||
     (pathname === "/" && account.mode === "server" && !signedIn);
 
@@ -128,7 +131,7 @@ function Shell({ children }: { children: ReactNode }) {
         <nav className="flex min-h-full w-64 flex-col gap-2 border-r-2 border-base-300 bg-base-100 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
           <div className="mb-2 flex items-center gap-1">
             <Link href="/" onClick={close} className="mr-auto flex items-center gap-2 px-2 py-1 text-xl font-black">
-              <span className="grid size-9 place-items-center rounded-field bg-primary text-primary-content">✓</span>
+              <KikuMark className="size-9" />
               Kiku
             </Link>
             {account.mode === "server" && (
@@ -139,7 +142,7 @@ function Shell({ children }: { children: ReactNode }) {
                 aria-label="Zur Homepage"
                 title="Zur Homepage"
               >
-                <Globe className="size-4" />
+                <House className="size-4" />
               </Link>
             )}
           </div>
