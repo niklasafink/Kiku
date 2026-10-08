@@ -1,7 +1,7 @@
 // Server-side only: reads the OpenRouter key. Do not import from client components.
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 
-export const GRADING_MODEL = process.env.GRADING_MODEL || "anthropic/claude-sonnet-5.5";
+export const GRADING_MODEL = process.env.GRADING_MODEL || "openai/gpt-6-luna";
 export const TRANSCRIBE_MODEL = process.env.TRANSCRIBE_MODEL || "google/gemini-3.8-flash";
 
 export class MissingKeyError extends Error {

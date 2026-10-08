@@ -48,7 +48,7 @@ Open http://localhost:3000.
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `OPENROUTER_API_KEY` | yes | | Key from [openrouter.ai/keys](https://openrouter.ai/keys) |
-| `GRADING_MODEL` | no | `anthropic/claude-sonnet-5.5` | Model that compares answer and solution |
+| `GRADING_MODEL` | no | `openai/gpt-6-luna` | Model that compares answer and solution |
 | `TRANSCRIBE_MODEL` | no | `google/gemini-3.8-flash` | Model that transcribes recordings; must accept audio input |
 
 ### Using the microphone on another device
