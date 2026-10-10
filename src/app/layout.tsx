@@ -11,10 +11,21 @@ const nunito = Nunito({
   subsets: ["latin"],
 });
 
+const DESCRIPTION = "Karteikarten lernen: Antwort sprechen oder tippen, KI gleicht mit deiner Lösung ab.";
+
+// Link previews need absolute image URLs; the hosted app lives at kikucards.de, a local
+// install has no public address and Next falls back to the request host.
+const SITE_URL = SERVER_MODE ? "https://kikucards.de" : undefined;
+
 export const metadata: Metadata = {
+  metadataBase: SITE_URL ? new URL(SITE_URL) : undefined,
   title: "Kiku",
-  description: "Karteikarten lernen: Antwort sprechen oder tippen, KI gleicht mit deiner Lösung ab.",
+  description: DESCRIPTION,
+  applicationName: "Kiku",
   appleWebApp: { capable: true, title: "Kiku", statusBarStyle: "default" },
+  // Title and description come from each page; the image is the one next to this file.
+  openGraph: { type: "website", siteName: "Kiku", locale: "de_DE", url: "/" },
+  twitter: { card: "summary_large_image" },
 };
 
 export const viewport: Viewport = {

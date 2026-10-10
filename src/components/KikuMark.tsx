@@ -2,7 +2,7 @@ import { useId, type SVGProps } from "react";
 
 /**
  * The Kiku mark: a bold K whose lower leg is the green check stroke. Same drawing as
- * src/app/icon.svg; the rounded corners are part of the picture, so it needs no wrapper.
+ * src/app/icon0.svg; the rounded corners are part of the picture, so it needs no wrapper.
  */
 export function KikuMark(props: SVGProps<SVGSVGElement>) {
   // Gradient ids must be unique when the mark appears more than once on a page.
