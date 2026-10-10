@@ -3,17 +3,22 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "./db";
 import {
   addAttempt,
+  addTagToCards,
   createCard,
   createCards,
   createFolder,
+  deleteCards,
   deleteFolderRecursive,
   exportAll,
   importAll,
   latestAttempts,
   loadSession,
+  moveCards,
   moveFolder,
+  restoreDeleted,
   saveSession,
   sessionKey,
+  setCardTags,
 } from "./repo";
 import { childrenOf, descendantIds, pathTo } from "./tree";
 
@@ -118,5 +123,55 @@ describe("attempts and backup", () => {
     expect(await importAll(backup)).toEqual({ folders: 1, cards: 1, attempts: 2 });
     expect(await db.attempts.count()).toBe(2);
     await expect(importAll({ version: 2 })).rejects.toThrow();
+  });
+});
+
+describe("undoing a deletion", () => {
+  it("brings a folder back with its cards and attempts, marked as changed again", async () => {
+    const folder = await createFolder("Bio", "🧬", null);
+    const sub = await createFolder("Zelle", "🔬", folder.id);
+    const card = await createCard(sub.id, "q", "s");
+    await addAttempt(attempt(card.id, 80));
+
+    const deleted = await deleteFolderRecursive(folder.id);
+    expect(deleted.folders.map((f) => f.id).sort()).toEqual([folder.id, sub.id].sort());
+    expect(deleted.cards.map((c) => c.id)).toEqual([card.id]);
+    expect(deleted.attempts).toHaveLength(1);
+    expect(await db.cards.count()).toBe(0);
+
+    await restoreDeleted(deleted);
+    expect((await db.folders.toArray()).map((f) => f.name).sort()).toEqual(["Bio", "Zelle"]);
+    const restored = (await db.cards.get(card.id)) as (typeof card & { dirty?: number }) | undefined;
+    expect(restored?.question).toBe("q");
+    expect(restored?.dirty).toBe(1);
+    expect(restored!.updatedAt).toBeGreaterThanOrEqual(deleted.cards[0].updatedAt);
+    expect((await db.attempts.where("cardId").equals(card.id).toArray())[0]?.score).toBe(80);
+  });
+
+  it("deletes several cards at once and puts them back", async () => {
+    const folder = await createFolder("Bio", "🧬", null);
+    const a = await createCard(folder.id, "a", "s");
+    const b = await createCard(folder.id, "b", "s");
+    const c = await createCard(folder.id, "c", "s");
+    const deleted = await deleteCards([a.id, c.id]);
+    expect((await db.cards.toArray()).map((card) => card.id)).toEqual([b.id]);
+    await restoreDeleted(deleted);
+    expect((await db.cards.toArray()).map((card) => card.question).sort()).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("cards in bulk", () => {
+  it("moves cards and adds a tag without duplicating it", async () => {
+    const from = await createFolder("Von", "📁", null);
+    const to = await createFolder("Nach", "📁", null);
+    const a = await createCard(from.id, "a", "s");
+    const b = await createCard(from.id, "b", "s");
+    await setCardTags(b.id, ["Klausur"]);
+    await moveCards([a.id, b.id], to.id);
+    expect((await db.cards.where("folderId").equals(to.id).count())).toBe(2);
+    await addTagToCards([a.id, b.id], " klausur ");
+    expect((await db.cards.get(a.id))?.tags).toEqual(["klausur"]);
+    expect((await db.cards.get(b.id))?.tags).toEqual(["Klausur"]);
+    await expect(moveCards([a.id], "missing")).rejects.toThrow();
   });
 });

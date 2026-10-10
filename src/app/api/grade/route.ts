@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { errorResponse, FREE_PLAN_GRADING_MODELS } from "@/lib/ai";
+import { refundAi, takeAi } from "@/server/aiQuota";
 import { planOrDeny } from "@/server/auth";
 import { gradeAnswer } from "@/server/grade";
 
@@ -24,10 +25,16 @@ export async function POST(request: Request) {
   }
   const { question, solution, answer } = parsed.data;
 
+  const allowance = await takeAi(plan);
+  if (allowance instanceof Response) return allowance;
+
   try {
     const options = plan === "free" ? { models: FREE_PLAN_GRADING_MODELS, thinking: false } : undefined;
-    return Response.json(await gradeAnswer(question, solution, answer, options));
+    const graded = await gradeAnswer(question, solution, answer, options);
+    // The browser shows how much of the month is left once it gets scarce.
+    return Response.json({ ...graded, remaining: allowance.remaining, limit: allowance.limit });
   } catch (error) {
+    await refundAi(allowance);
     return errorResponse(error);
   }
 }

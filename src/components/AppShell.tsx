@@ -10,10 +10,13 @@ import { useAttemptLog, useFolders } from "@/lib/hooks";
 import { db } from "@/lib/db";
 import { cleanupImages } from "@/lib/images";
 import { enableOffline } from "@/lib/offline";
+import { gradePendingAnswers } from "@/lib/pendingGrades";
+import { showToast } from "@/lib/toast";
 import { streakOf } from "@/lib/stats";
 import { childrenOf } from "@/lib/tree";
 import type { Folder } from "@/lib/types";
 import { KikuMark } from "@/components/KikuMark";
+import { Toasts } from "@/components/Toasts";
 
 function TreeNode({
   folder,
@@ -107,6 +110,7 @@ export function AppShell({ serverMode, children }: { serverMode: boolean; childr
   return (
     <AccountProvider serverMode={serverMode}>
       <Shell>{children}</Shell>
+      <Toasts />
     </AccountProvider>
   );
 }
@@ -152,6 +156,27 @@ function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (inApp && anyCard !== undefined) void enableOffline(anyFolder, anyCard ?? undefined);
   }, [inApp, anyFolder, anyCard]);
+  // Answers given without a network are graded as soon as there is one: on opening the app,
+  // when the network returns and when the tab comes back.
+  useEffect(() => {
+    if (!inApp) return;
+    const run = () => {
+      if (!navigator.onLine) return;
+      void gradePendingAnswers().then(({ graded }) => {
+        if (graded > 0) showToast(graded === 1 ? "Eine Antwort von unterwegs wurde ausgewertet." : `${graded} Antworten von unterwegs wurden ausgewertet.`);
+      });
+    };
+    const whenVisible = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    run();
+    window.addEventListener("online", run);
+    document.addEventListener("visibilitychange", whenVisible);
+    return () => {
+      window.removeEventListener("online", run);
+      document.removeEventListener("visibilitychange", whenVisible);
+    };
+  }, [inApp]);
   const close = () => setOpen(false);
   const showBanner = account.mode === "server" && account.user?.plan === "free";
 

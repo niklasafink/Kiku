@@ -22,6 +22,7 @@ import {
   Table,
   Trash2,
 } from "lucide-react";
+import { FormulaNode, insertFormula as insertFormulaNode } from "@/components/FormulaNode";
 import { RichText } from "@/components/RichText";
 import { editorHtmlToMarkdown, IMAGE_ID_ATTRIBUTE, markdownToEditorHtml } from "@/lib/editorHtml";
 import { ImageError, imageUrl, saveImage } from "@/lib/images";
@@ -95,6 +96,7 @@ export default function VisualEditor({
       StarterKit.configure({ blockquote: false, codeBlock: false, horizontalRule: false, strike: false, underline: false, link: false, heading: { levels: [2, 3] } }),
       Highlight,
       CardPicture.configure({ inline: true }),
+      FormulaNode,
       TableKit.configure({ table: { resizable: false } }),
     ],
     content: markdownToEditorHtml(value, srcOf),
@@ -183,7 +185,7 @@ export default function VisualEditor({
     if (!editor) return;
     const { from, to } = editor.state.selection;
     const selected = editor.state.doc.textBetween(from, to);
-    editor.chain().focus().insertContent(`$${selected || "x^2"}$`).run();
+    insertFormulaNode(editor, selected || "x^2");
   }
 
   const tool = (active = false) => `btn btn-sm btn-square ${active ? "bg-base-300" : "btn-ghost"}`;
@@ -225,7 +227,7 @@ export default function VisualEditor({
           <button type="button" className={tool(editor.isActive("highlight"))} onClick={() => editor.chain().focus().toggleHighlight().run()} title="Markieren" aria-label="Markieren" aria-pressed={editor.isActive("highlight")}>
             <Highlighter className="size-4" />
           </button>
-          <button type="button" className={tool()} onClick={insertFormula} title="Formel (LaTeX), z. B. $E = mc^2$. In der Vorschau wird sie gesetzt." aria-label="Formel">
+          <button type="button" className={tool()} onClick={insertFormula} title="Formel (LaTeX) einfügen, z. B. E = mc^2. Zum Bearbeiten anklicken." aria-label="Formel">
             <Sigma className="size-4" />
           </button>
           <button type="button" className={tool(editor.isActive("heading"))} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} title="Überschrift" aria-label="Überschrift" aria-pressed={editor.isActive("heading")}>

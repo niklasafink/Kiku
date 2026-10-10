@@ -10,6 +10,7 @@ function pagesToStore(folderId: string | undefined, cardId: string | undefined):
   if (folderId) {
     pages.push(`/f/${folderId}`, `/f/${folderId}/learn`);
     for (const mode of ["due", "weak", "exam"]) pages.push(`/f/${folderId}/learn?mode=${mode}`);
+    pages.push(`/f/${folderId}/learn?mode=exam&resume=1`);
     pages.push(`/f/${folderId}/learn?resume=1`);
   }
   if (cardId) pages.push(`/c/${cardId}`, `/c/${cardId}/learn`);

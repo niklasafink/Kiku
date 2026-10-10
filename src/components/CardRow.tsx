@@ -16,46 +16,72 @@ function Picture() {
   );
 }
 
-/** One card in a list, shown as two small flashcards: question on the left, solution on the right. */
+/**
+ * One card in a list, shown as two small flashcards: question on the left, solution on the right.
+ * With `onToggle` the row is part of a selection: a tap selects it instead of opening it.
+ */
 export function CardRow({
   card,
   last,
   showSolution,
   caption,
+  selected,
+  onToggle,
 }: {
   card: Card;
   last?: Attempt;
   showSolution: boolean;
   /** Optional line above the pair, e.g. the folder path in search results. */
   caption?: string;
+  selected?: boolean;
+  onToggle?: () => void;
 }) {
+  const faces = (
+    <span className="grid gap-2 sm:grid-cols-2 sm:gap-3">
+      <span className={FACE}>
+        <span className="flex items-center justify-between gap-2">
+          <span className={FACE_LABEL}>Frage</span>
+          <span className="flex items-center gap-1">
+            {last ? <ScoreBadge score={last.score} /> : <span className="badge badge-ghost badge-sm font-bold">Neu</span>}
+            {!onToggle && <StarButton card={card} className="-my-1.5 -mr-2" />}
+          </span>
+        </span>
+        <span className="line-clamp-4 font-bold whitespace-pre-wrap">{toPlainText(card.question)}</span>
+        {imageIds(card.question).length > 0 && <Picture />}
+        <TagList card={card} />
+      </span>
+      <span className={FACE}>
+        <span className={FACE_LABEL}>Lösung</span>
+        <span
+          className={`line-clamp-4 whitespace-pre-wrap transition-[filter] ${showSolution ? "" : "blur-[5px] select-none"}`}
+          aria-hidden={!showSolution}
+        >
+          {toPlainText(card.solution)}
+        </span>
+        {imageIds(card.solution).length > 0 && <Picture />}
+      </span>
+    </span>
+  );
+
+  if (onToggle) {
+    return (
+      <label className={`card-pair group flex cursor-pointer items-center gap-3 rounded-box ${selected ? "ring-3 ring-primary/50" : ""}`}>
+        <input
+          type="checkbox"
+          className="checkbox checkbox-primary shrink-0"
+          checked={Boolean(selected)}
+          onChange={onToggle}
+          aria-label={`Karte auswählen: ${toPlainText(card.question).slice(0, 80)}`}
+        />
+        <span className="min-w-0 flex-1">{faces}</span>
+      </label>
+    );
+  }
+
   return (
     <Link href={`/c/${card.id}`} className="card-pair group block">
       {caption && <span className="mb-1 block px-1 text-xs font-semibold opacity-60">{caption}</span>}
-      <span className="grid gap-2 sm:grid-cols-2 sm:gap-3">
-        <span className={FACE}>
-          <span className="flex items-center justify-between gap-2">
-            <span className={FACE_LABEL}>Frage</span>
-            <span className="flex items-center gap-1">
-              {last ? <ScoreBadge score={last.score} /> : <span className="badge badge-ghost badge-sm font-bold">Neu</span>}
-              <StarButton card={card} className="-my-1.5 -mr-2" />
-            </span>
-          </span>
-          <span className="line-clamp-4 font-bold whitespace-pre-wrap">{toPlainText(card.question)}</span>
-          {imageIds(card.question).length > 0 && <Picture />}
-          <TagList card={card} />
-        </span>
-        <span className={FACE}>
-          <span className={FACE_LABEL}>Lösung</span>
-          <span
-            className={`line-clamp-4 whitespace-pre-wrap transition-[filter] ${showSolution ? "" : "blur-[5px] select-none"}`}
-            aria-hidden={!showSolution}
-          >
-            {toPlainText(card.solution)}
-          </span>
-          {imageIds(card.solution).length > 0 && <Picture />}
-        </span>
-      </span>
+      {faces}
     </Link>
   );
 }

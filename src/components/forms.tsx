@@ -3,9 +3,9 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { RichEditor } from "@/components/RichEditor";
 import { toPlainText } from "@/lib/richText";
-import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
+import { MAX_CARD_TEXT, MAX_TAG_LENGTH } from "@/lib/syncProtocol";
 import { descendantIds, folderOptions } from "@/lib/tree";
-import type { Folder } from "@/lib/types";
+import { STAR_TAG, type Folder } from "@/lib/types";
 
 const EMOJIS = ["📁", "📚", "🧠", "🧬", "⚖️", "💶", "📐", "🧪", "🌍", "💻", "🩺", "🎨", "🗣️", "🏛️", "⚙️", "⭐"];
 
@@ -114,6 +114,106 @@ export function MoveFolderForm({
         </button>
         <button type="submit" className="btn btn-primary btn-chunky" disabled={target === (folder.parentId ?? ROOT)}>
           Verschieben
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Picks the folder a selection of cards moves to. */
+export function MoveCardsForm({
+  folders,
+  current,
+  onSubmit,
+  onCancel,
+}: {
+  folders: Folder[];
+  /** Folder the cards are in now; it is not offered. */
+  current: string;
+  onSubmit: (folderId: string) => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  const options = folderOptions(folders).filter((option) => option.id !== current);
+  const [target, setTarget] = useState(options[0]?.id ?? "");
+  return (
+    <form
+      className="flex flex-col gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (target) void onSubmit(target);
+      }}
+    >
+      {options.length === 0 ? (
+        <p className="opacity-70">Es gibt keinen anderen Ordner. Lege zuerst einen an.</p>
+      ) : (
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-bold">Verschieben nach</span>
+          <select className="select w-full" value={target} onChange={(e) => setTarget(e.target.value)} autoFocus>
+            {options.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <p className="text-sm opacity-70">Der Lernverlauf der Karten zieht mit um.</p>
+      <div className="modal-action mt-2">
+        <button type="button" className="btn btn-ghost" onClick={onCancel}>
+          Abbrechen
+        </button>
+        <button type="submit" className="btn btn-primary btn-chunky" disabled={!target}>
+          Verschieben
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** One tag for a selection of cards; existing tags are offered for completion. */
+export function TagCardsForm({
+  known,
+  onSubmit,
+  onCancel,
+}: {
+  known: string[];
+  onSubmit: (tag: string) => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  const [tag, setTag] = useState("");
+  const suggestions = known.filter((t) => t !== STAR_TAG);
+  return (
+    <form
+      className="flex flex-col gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (tag.trim()) void onSubmit(tag);
+      }}
+    >
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm font-bold">Tag</span>
+        <input
+          className="input w-full"
+          value={tag}
+          onChange={(e) => setTag(e.target.value)}
+          placeholder="z. B. klausurrelevant"
+          maxLength={MAX_TAG_LENGTH}
+          list="tag-cards-suggestions"
+          autoFocus
+        />
+        <datalist id="tag-cards-suggestions">
+          {suggestions.map((t) => (
+            <option key={t} value={t} />
+          ))}
+        </datalist>
+      </label>
+      <p className="text-sm opacity-70">Karten, die den Tag schon haben, bleiben wie sie sind.</p>
+      <div className="modal-action mt-2">
+        <button type="button" className="btn btn-ghost" onClick={onCancel}>
+          Abbrechen
+        </button>
+        <button type="submit" className="btn btn-primary btn-chunky" disabled={!tag.trim()}>
+          Tag vergeben
         </button>
       </div>
     </form>

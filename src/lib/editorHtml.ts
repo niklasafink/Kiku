@@ -1,6 +1,6 @@
 // Card text as HTML for the visual editor, and back. The editor works on HTML; cards stay the
 // Markdown subset described in richText.ts, so nothing else has to know about the editor.
-import { htmlToMarkdown } from "./html";
+import { htmlToMarkdown, MATH_ATTRIBUTE } from "./html";
 import { IMAGE_SCHEME, imageMarkup, parseBlocks, type Inline } from "./richText";
 
 const escapeHtml = (text: string) =>
@@ -8,6 +8,11 @@ const escapeHtml = (text: string) =>
 
 /** Attribute that carries a picture's id through the editor; its src is only a temporary object URL. */
 export const IMAGE_ID_ATTRIBUTE = "data-kiku-id";
+export { MATH_ATTRIBUTE };
+
+/** A formula as the editor's node expects it (FormulaNode.tsx): the source in an attribute, typeset by the node view. */
+const mathHtml = (tex: string, display: boolean) =>
+  `<span ${MATH_ATTRIBUTE}="${escapeHtml(tex)}" data-display="${display ? "true" : "false"}"></span>`;
 
 function inlineHtml(inlines: Inline[], srcOf: (id: string) => string): string {
   return inlines
@@ -24,8 +29,7 @@ function inlineHtml(inlines: Inline[], srcOf: (id: string) => string): string {
         case "code":
           return `<code>${escapeHtml(inline.text)}</code>`;
         case "math":
-          // Formulas are edited as their source; the preview and the study view typeset them.
-          return escapeHtml(inline.display ? `$$${inline.tex}$$` : `$${inline.tex}$`);
+          return mathHtml(inline.tex, inline.display);
         case "image":
           return `<img src="${escapeHtml(srcOf(inline.id))}" alt="${escapeHtml(inline.alt)}" ${IMAGE_ID_ATTRIBUTE}="${escapeHtml(inline.id)}">`;
       }
@@ -42,7 +46,8 @@ export function markdownToEditorHtml(text: string, srcOf: (id: string) => string
         case "heading":
           return `<h${block.level === 3 ? 3 : 2}>${inlineHtml(block.inlines, srcOf)}</h${block.level === 3 ? 3 : 2}>`;
         case "math":
-          return `<p>${escapeHtml(`$$${block.tex.replace(/\s*\n\s*/g, " ")}$$`)}</p>`;
+          // A formula over several lines becomes one line: the editor's formula element holds no line breaks.
+          return `<p>${mathHtml(block.tex.replace(/\s*\n\s*/g, " "), true)}</p>`;
         case "list": {
           // Items carry their depth; lists nest by opening and closing as the depth changes.
           const tag = block.ordered ? "ol" : "ul";

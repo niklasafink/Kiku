@@ -62,6 +62,10 @@ export interface StudyCardState {
   usedVoice: boolean;
   /** The answer (or part of it) was written by hand and read by the AI. */
   usedPen?: boolean;
+  /** Handwriting not read yet; kept here so an exam left before handing in keeps it. */
+  ink?: import("./ink").Stroke[];
+  /** The answer was given without a network and waits in the queue (see PendingAnswer). */
+  pending?: boolean;
   /** Solution shown without answering; nothing is saved. */
   revealed: boolean;
   attempt: Attempt | null;
@@ -81,4 +85,18 @@ export interface SavedSession {
   index: number;
   states: Record<string, StudyCardState>;
   updatedAt: number;
+}
+
+/** An answer given without a network. It is graded and becomes an attempt once there is one. */
+export interface PendingAnswer {
+  id: string;
+  cardId: string;
+  /** When the answer was given; the attempt keeps this time. */
+  createdAt: number;
+  inputMode: InputMode;
+  answer: string;
+  /** Handwriting still to be read by the AI, which also needs the network. */
+  ink?: import("./ink").Stroke[];
+  question: string;
+  solutionSnapshot: string;
 }

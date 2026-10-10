@@ -129,6 +129,13 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           {pending && <span className="loading loading-spinner loading-sm" />}
           {signUp ? "Konto anlegen" : "Anmelden"}
         </button>
+        {!signUp && (
+          <p className="text-center text-sm">
+            <Link href="/auth/forgot-password" className="link opacity-80">
+              Passwort vergessen?
+            </Link>
+          </p>
+        )}
         <p className="text-center text-sm">
           {signUp ? "Schon ein Konto? " : "Noch kein Konto? "}
           <Link href={signUp ? "/auth/sign-in" : "/auth/sign-up"} className="link font-bold">

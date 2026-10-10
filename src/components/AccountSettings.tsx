@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Check, Copy, KeyRound, LogOut, RefreshCw, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, Copy, KeyRound, LockKeyhole, LogOut, RefreshCw, Trash2, UserX } from "lucide-react";
 import { useAccount, useSyncState } from "@/components/Account";
+import { Modal } from "@/components/Modal";
+import { authAttempt, authClient } from "@/lib/authClient";
 import { formatDateTime } from "@/lib/format";
 import { syncNow } from "@/lib/sync";
 
@@ -41,7 +44,14 @@ function AccountSection() {
       <h2 className="text-lg font-extrabold">Konto</h2>
       <p>
         Angemeldet als <span className="font-bold">{account.user.email}</span>
+        {account.user.plan === "paid" ? " (Pro)" : " (kostenlos)"}
       </p>
+      {account.user.ai && (
+        <p className="text-sm opacity-80">
+          KI-Auswertungen in diesem Monat: noch {account.user.ai.remaining} von {account.user.ai.limit}. Bewertungen und
+          Erklärungen zählen, „Lösung zeigen“ nicht.
+        </p>
+      )}
       <p className="text-sm opacity-80" role="status">
         {sync.status === "syncing" && "Synchronisiert gerade …"}
         {sync.status === "error" && `Sync fehlgeschlagen: ${sync.error}`}
@@ -58,6 +68,142 @@ function AccountSection() {
           <LogOut className="size-4" /> Abmelden
         </button>
       </div>
+    </section>
+  );
+}
+
+/** Change the password with the current one; other devices stay signed in. */
+function PasswordForm({ onDone, onSaved }: { onDone: () => void; onSaved: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    const failure = await authAttempt(() =>
+      authClient.changePassword({ currentPassword: current, newPassword: next, revokeOtherSessions: false }),
+    );
+    setPending(false);
+    if (failure === undefined) {
+      onSaved();
+      return onDone();
+    }
+    if (failure === null) return setError("Der Server ist nicht erreichbar. Bitte versuche es noch einmal.");
+    const text = `${failure.code ?? ""} ${failure.message ?? ""}`.toLowerCase();
+    setError(
+      text.includes("invalid") || text.includes("incorrect") || failure.status === 400 || failure.status === 401
+        ? "Das aktuelle Passwort stimmt nicht."
+        : (failure.message ?? "Das Passwort konnte nicht geändert werden."),
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm font-bold">Aktuelles Passwort</span>
+        <input className="input w-full" type="password" required value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" autoFocus />
+      </label>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm font-bold">Neues Passwort</span>
+        <input className="input w-full" type="password" required minLength={8} value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+        <span className="text-xs opacity-60">Mindestens 8 Zeichen</span>
+      </label>
+      {error && (
+        <p role="alert" className="alert alert-error alert-soft text-sm">
+          {error}
+        </p>
+      )}
+      <div className="modal-action mt-2">
+        <button type="button" className="btn btn-ghost" onClick={onDone}>
+          Abbrechen
+        </button>
+        <button type="submit" className="btn btn-primary btn-chunky" disabled={pending || !current || next.length < 8}>
+          {pending && <span className="loading loading-spinner loading-sm" />}
+          Passwort ändern
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Deletes the account for good, after the password was typed once more. */
+function DeleteAccountForm({ onCancel }: { onCancel: () => void }) {
+  const account = useAccount();
+  const router = useRouter();
+  const [password, setPassword] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (account.mode !== "server") return;
+    setPending(true);
+    setError(null);
+    try {
+      await account.deleteAccount(password);
+      router.replace("/home");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Das Konto konnte nicht gelöscht werden.");
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      <p>
+        Alle Ordner, Karten, Bilder, der Lernverlauf, geteilte Links und MCP-Zugänge werden gelöscht, auf dem Server und
+        auf diesem Gerät. Das lässt sich nicht rückgängig machen. Lade vorher ein Backup herunter, wenn du die Karten behalten willst.
+      </p>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm font-bold">Zur Bestätigung dein Passwort</span>
+        <input className="input w-full" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" autoFocus />
+      </label>
+      {error && (
+        <p role="alert" className="alert alert-error alert-soft text-sm">
+          {error}
+        </p>
+      )}
+      <div className="modal-action mt-2">
+        <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={pending}>
+          Abbrechen
+        </button>
+        <button type="submit" className="btn btn-error btn-chunky" disabled={pending || !password}>
+          {pending && <span className="loading loading-spinner loading-sm" />}
+          Konto endgültig löschen
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function SecuritySection() {
+  const [dialog, setDialog] = useState<"password" | "delete" | null>(null);
+  const [changed, setChanged] = useState(false);
+  return (
+    <section className="tile flex flex-col gap-4 p-5">
+      <h2 className="text-lg font-extrabold">Passwort und Konto</h2>
+      <div className="flex flex-wrap gap-3">
+        <button className="btn btn-chunky bg-base-200" onClick={() => setDialog("password")}>
+          <LockKeyhole className="size-4" /> Passwort ändern
+        </button>
+        <button className="btn btn-ghost text-error" onClick={() => setDialog("delete")}>
+          <UserX className="size-4" /> Konto löschen
+        </button>
+      </div>
+      {changed && (
+        <p role="status" className="alert alert-success alert-soft text-sm">
+          Das Passwort ist geändert.
+        </p>
+      )}
+      <Modal open={dialog === "password"} onClose={() => setDialog(null)} title="Passwort ändern">
+        <PasswordForm onDone={() => setDialog(null)} onSaved={() => setChanged(true)} />
+      </Modal>
+      <Modal open={dialog === "delete"} onClose={() => setDialog(null)} title="Konto löschen?">
+        <DeleteAccountForm onCancel={() => setDialog(null)} />
+      </Modal>
     </section>
   );
 }
@@ -188,6 +334,7 @@ export function AccountSettings() {
   return (
     <>
       <AccountSection />
+      <SecuritySection />
       <McpSection />
     </>
   );

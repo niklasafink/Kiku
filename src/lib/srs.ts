@@ -104,6 +104,8 @@ export function planToday(
   schedules: Map<string, Schedule>,
   folders: Folder[],
   now: number,
+  /** New cards per day without an exam date; adjustable in the settings. */
+  newPerDay = NEW_PER_DAY,
 ): Today {
   const exams = examDates(folders, now);
   const today = startOfDay(now);
@@ -127,7 +129,7 @@ export function planToday(
   const fresh: Card[] = [];
   let later = 0;
   for (const [exam, group] of groups) {
-    let quota = NEW_PER_DAY;
+    let quota = newPerDay;
     if (exam !== undefined) {
       const days = Math.max(1, daysUntil(exam, now) - CRAM_DAYS);
       quota = Math.ceil((group.fresh.length + group.startedToday) / days);

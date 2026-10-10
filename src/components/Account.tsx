@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { authClient } from "@/lib/authClient";
+import { authAttempt, authClient } from "@/lib/authClient";
 import { bindToUser, pendingChanges, startBackgroundSync, syncNow, syncStore, wipeLocal } from "@/lib/sync";
 
 export interface AccountUser {
@@ -9,6 +9,8 @@ export interface AccountUser {
   email: string;
   name: string;
   plan: "free" | "paid";
+  /** Gradings and explanations left this month. Missing while the app is offline. */
+  ai?: { remaining: number; limit: number };
 }
 
 type Account =
@@ -21,6 +23,8 @@ type Account =
       /** Re-reads the session and returns the signed-in user, if any. */
       refresh: () => Promise<AccountUser | null>;
       signOut: () => Promise<void>;
+      /** Deletes the library on the server and the account itself. Throws with a message for the user. */
+      deleteAccount: (password: string) => Promise<void>;
     };
 
 const AccountContext = createContext<Account>({ mode: "local" });
@@ -113,6 +117,32 @@ export function AccountProvider({ serverMode, children }: { serverMode: boolean;
     setUser(null);
   }, []);
 
+  const deleteAccount = useCallback(
+    async (password: string) => {
+      if (!user) return;
+      // The password proves it is really the owner, and gives a session fresh enough for the deletion.
+      const check = await authAttempt(() => authClient.signIn.email({ email: user.email, password }));
+      if (check === null) throw new Error("Der Server ist nicht erreichbar. Bitte versuche es noch einmal.");
+      if (check) throw new Error("Das Passwort stimmt nicht.");
+      // Nothing of this device may be sent to the server again, so the local copy goes first.
+      await wipeLocal();
+      const response = await fetch("/api/account", { method: "DELETE" });
+      if (!response.ok) throw new Error("Die Daten konnten nicht gelöscht werden. Bitte versuche es noch einmal.");
+      const gone = await authAttempt(() => authClient.deleteUser({ password }));
+      await wipeLocal();
+      rememberUser(null);
+      if (gone !== undefined) {
+        await authClient.signOut();
+        setUser(null);
+        throw new Error(
+          "Deine Ordner, Karten und Bilder sind gelöscht, aber das Anmeldekonto konnte nicht entfernt werden. Schreib uns kurz, dann erledigen wir das.",
+        );
+      }
+      setUser(null);
+    },
+    [user],
+  );
+
   const account: Account = serverMode
     ? {
         mode: "server",
@@ -120,6 +150,7 @@ export function AccountProvider({ serverMode, children }: { serverMode: boolean;
         user: user ?? null,
         refresh,
         signOut,
+        deleteAccount,
       }
     : { mode: "local" };
 

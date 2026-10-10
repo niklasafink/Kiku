@@ -61,3 +61,8 @@ export function useAttemptLog() {
     return log;
   }, []);
 }
+
+/** Answers given without a network that still wait to be graded; undefined while loading. */
+export function usePendingCount() {
+  return useLiveQuery(() => db.pending.count(), []);
+}

@@ -22,15 +22,17 @@ it works on tablets, phones, Mac and Windows alike. On iPad you can add it to th
 - Folders with any depth of subfolders, cards with question and solution side by side; folders and cards can be moved
 - Rich cards: bold, italic, highlighting, headings, lists, tables, formulas (LaTeX) and pictures, written in an editor that shows the card as it will look. Pictures are pasted, dropped or picked
 - Image occlusion: cover spots of a diagram and name them; each spot becomes a card that asks for it
+- Cloze cards: mark gaps in a text (`[[word]]`, or Anki's `{{c1::word}}`); each gap becomes a card that asks for it
 - Import: paste a table, or drop an Excel (.xlsx), CSV, TSV or text file; choose which columns hold question and solution. Tens of thousands of rows take about a second
 - Import from Anki: packages (.apkg, .colpkg) with their decks as subfolders, pictures, formatting and cloze notes; text exports with HTML are converted too
-- Export a folder or the whole library as CSV (Excel, Numbers), as an Anki package (.apkg) with pictures, as a text file for Anki, or as plain tab-separated text (Quizlet and others); all of them can be imported again
+- Export a folder or the whole library as CSV (Excel, Numbers), as an Anki package (.apkg) with pictures and covered occlusion boxes, as a text file for Anki, or as plain tab-separated text (Quizlet and others); all of them can be imported again
+- Select several cards at once to move, tag or delete them; deleting a card or folder can be undone right away
 - AI cards from your material: upload lecture slides or a script (PDF, also scanned; PowerPoint, Word, text, photos of your notes), review the proposed cards, then save them
 - Spaced repetition: after each answer the card is scheduled for its next repetition (FSRS), with the AI's score as the rating
-- Exam dates: set the day of the exam on a folder and "Heute lernen" hands out what is due plus today's share of the new cards
+- Exam dates: set the day of the exam on a folder and "Heute lernen" hands out what is due plus today's share of the new cards; the number of new cards per day is adjustable in the settings
 - Study a folder including all of its subfolders, only its weak cards, or a single card
 - Jump back and forth between cards while studying (buttons or arrow keys), shuffle, or just reveal a solution
-- Leave a study session at any point and continue it later where you stopped
+- Leave a study session or an exam simulation at any point and continue it later where you stopped, handwriting included
 - Search across all questions and solutions
 - Voice answers of any practical length: recorded in the browser, transcribed by an AI model
 - Typed answers as an alternative, and you can correct the transcript before grading
@@ -40,7 +42,8 @@ it works on tablets, phones, Mac and Windows alike. On iPad you can add it to th
 - Tags and a star to mark cards across folders, to filter by and to study
 - Statistics: streak, answers per day, average score and the repetitions coming up
 - Share a folder by link; others can read it and copy it into their own library
-- Works without a network: browse, write cards and check yourself against the solution; grading waits for a connection
+- Works without a network: browse, write cards and answer; answers given offline are graded as soon as the connection is back
+- A sample folder for the first visit, so the spoken answer and the grading can be tried right away
 - Per-card history with score trend and the graded solution of every attempt
 - Light and dark theme
 - JSON backup and restore
@@ -65,6 +68,11 @@ Open http://localhost:3000.
 | `GRADING_MODEL` | no | `openai/gpt-6-luna` | Model that compares answer and solution |
 | `TRANSCRIBE_MODEL` | no | `google/gemini-3.8-flash` | Model that transcribes recordings; must accept audio input |
 | `PAID_EMAILS` | no | | With accounts on: comma-separated e-mail addresses of paid accounts. Everyone else is on the free plan |
+
+With accounts on, AI use is limited per account: gradings and explanations per month (`AI_LIMITS` in
+`src/server/quota.ts`: 500 paid; 1000 free as a guard against scripts, since free accounts use free
+and very cheap models), card generation and pictures read by the AI per day.
+Without accounts (local mode) nothing is counted.
 | `FREE_PLAN_GRADING_MODELS` | no | two free models, then a very cheap one | Comma-separated models that grade for the free plan, tried in order |
 
 On the free plan the browser's own speech recognition transcribes (Chrome, Edge, Safari), and
@@ -104,7 +112,10 @@ Pictures in cards are never sent to the AI.
    keep it, and the sign-in then appears to do nothing.
 
 Data you created in local mode before your first sign-in on a device is added to your account.
-Signing out removes the local copy from that device; the library stays in the account.
+Signing out removes the local copy from that device; the library stays in the account. The
+settings offer changing the password and deleting the account (library, pictures, shares and
+tokens on the server, then the account at Neon Auth); "Passwort vergessen" on the sign-in page
+sends a reset link through Neon Auth.
 
 ### How sync works
 
@@ -195,7 +206,9 @@ is one and from its cache otherwise. The data is in IndexedDB anyway, so what it
 pages of the app. Pages that carry an id in their address (`/f/<id>`, `/c/<id>`) are identical
 apart from that id; for one that was never opened the worker takes the stored copy of another id
 and swaps the id. `src/lib/offline.ts` loads one page of each kind after a new version is
-installed. Every deployment has its own cache. Grading, transcription and sync need the network.
+installed. Every deployment has its own cache. Transcription and sync need the network. An answer
+given without one is kept in IndexedDB (`pending` table) and graded by `src/lib/pendingGrades.ts`
+when the app is opened or the network returns; the attempt keeps the time the answer was given.
 
 ## Sharing
 
@@ -212,7 +225,7 @@ through [FSRS](https://github.com/open-spaced-repetition/ts-fsrs) with the score
 arrives at the same dates, and history from before this feature counts.
 
 "Heute lernen" contains the cards that are due and today's share of the cards never answered:
-10 per day, or, if the folder (or a parent) has an exam date, the remaining new cards spread
+10 per day (adjustable per device in the settings), or, if the folder (or a parent) has an exam date, the remaining new cards spread
 evenly over the days until three days before the exam. In those last three days every card
 comes up once more. The logic is in `src/lib/srs.ts`.
 
@@ -238,7 +251,7 @@ already done when you stop. A recording ends on its own after 30 minutes.
 src/app/                 routes (library, folder, card, study session, settings)
 src/app/api/grade        compares answer and solution
 src/app/api/transcribe   speech to text
-src/components/          UI components
+src/components/          UI components (FormulaNode.tsx typesets formulas inside the editor)
 src/lib/repo.ts          data access in the browser (IndexedDB)
 src/lib/sync.ts          browser half of the sync
 src/server/              database schema, server half of the sync, MCP server, access tokens
@@ -254,7 +267,13 @@ src/lib/images.ts        pictures in cards: scaling, local storage, upload
 src/lib/srs.ts           spaced repetition and the plan towards an exam
 src/lib/stats.ts         streak and the numbers of the statistics page
 src/lib/ink.ts           handwriting: strokes, painting, the picture the AI reads
-src/lib/occlusion.ts     image occlusion cards
+src/lib/occlusion.ts     image occlusion cards, and the covered picture for the Anki export
+src/lib/cloze.ts         cloze cards from a text with gaps
+src/lib/pendingGrades.ts grading answers that were given offline
+src/lib/toast.ts         short messages with an undo button (src/components/Toasts.tsx)
+src/lib/settings.ts      preferences kept on the device
+src/lib/sample.ts        the sample folder for the first visit
+src/server/account.ts    deleting everything an account stored
 src/lib/editorHtml.ts    card text to and from the visual editor (src/components/VisualEditor.tsx)
 src/lib/ankiExport.ts    writing Anki packages (src/lib/sqliteWrite.ts, src/lib/zipWrite.ts)
 src/lib/offline.ts       registering the service worker and storing the pages
@@ -285,8 +304,7 @@ with the OpenRouter provider, Vitest.
 - OAuth for the MCP endpoint, so clients without custom headers can connect
 - English interface
 - Push notifications as a reminder to keep the streak
-- Grading answers that were given offline once the connection is back
-- Occlusion masks in the Anki export (pictures are exported uncovered)
+- Checkout and subscription management (paid accounts are listed by hand today)
 
 ## License
 

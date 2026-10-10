@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { errorResponse, FREE_PLAN_GRADING_MODELS } from "@/lib/ai";
+import { refundAi, takeAi } from "@/server/aiQuota";
 import { planOrDeny } from "@/server/auth";
 import { explainGaps } from "@/server/explain";
 
@@ -20,10 +21,15 @@ export async function POST(request: Request) {
   if (!parsed.success) return Response.json({ error: "Ungültige Anfrage." }, { status: 400 });
   const { question, answer, segments } = parsed.data;
 
+  // An explanation counts like a grading: it is a second AI call of about the same size.
+  const allowance = await takeAi(plan);
+  if (allowance instanceof Response) return allowance;
+
   try {
     const options = plan === "free" ? { models: FREE_PLAN_GRADING_MODELS, thinking: false } : undefined;
     return Response.json({ text: await explainGaps(question, answer, segments, options) });
   } catch (error) {
+    await refundAi(allowance);
     return errorResponse(error);
   }
 }

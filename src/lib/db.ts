@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable, type Transaction } from "dexie";
 import { SYNC_TABLES, type SyncTable } from "./syncProtocol";
-import type { Attempt, Card, Folder, SavedSession, StoredImage } from "./types";
+import type { Attempt, Card, Folder, PendingAnswer, SavedSession, StoredImage } from "./types";
 
 /** A locally deleted row the server still has to hear about. */
 export interface Tombstone {
@@ -23,6 +23,7 @@ export class AppDB extends Dexie {
   tombstones!: EntityTable<Tombstone, "id">;
   meta!: EntityTable<MetaEntry, "key">;
   images!: EntityTable<StoredImage, "id">;
+  pending!: EntityTable<PendingAnswer, "id">;
 
   /** Transactions that apply server data; their writes must not count as local changes. */
   readonly remote = new WeakSet<Transaction>();
@@ -63,6 +64,8 @@ export class AppDB extends Dexie {
       );
     // Pictures are not part of the row sync: they are uploaded one by one, see images.ts.
     this.version(4).stores({ images: "id, uploaded" });
+    // Answers given without a network, waiting to be graded. Per device, like the sessions.
+    this.version(5).stores({ pending: "id, cardId" });
 
     for (const name of SYNC_TABLES) {
       const table = this.table(name);

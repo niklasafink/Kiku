@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { readAnkiPackage, resolveAnkiImages } from "./anki";
 import { buildAnkiPackage } from "./ankiExport";
+import type { ImageFile, Occlusion } from "./occlusion";
 import { SqliteFile } from "./sqlite";
 import type { Card, Folder } from "./types";
 import { openZip } from "./zip";
@@ -269,5 +270,107 @@ describe("buildAnkiPackage", () => {
     expect(db.prepare("PRAGMA integrity_check").all()).toEqual([{ integrity_check: "ok" }]);
     expect(Object.keys(JSON.parse(db.prepare("SELECT decks FROM col").get()!.decks as string) as object)).toEqual(["1"]);
     expect((await readAnkiPackage(buffer)).decks).toEqual([]);
+  });
+});
+
+describe("buildAnkiPackage with image occlusion", () => {
+  const BOXES = "120,340,200,80;500,100,150,60";
+  const occ = (id: string, asked: number, revealed: boolean) => `![occ:${BOXES}#${asked}${revealed ? "r" : ""}](kiku-img:${id})`;
+  const occlusionCard = (id: string, asked: number, createdAt: number) =>
+    card(id, "heart", `Was ist hier verdeckt?\n\n${occ(PNG_ID, asked, false)}`, `Antwort ${asked}\n\n${occ(PNG_ID, asked, true)}`, createdAt);
+
+  /** Stands in for the canvas: a tiny "picture" that records which side and box it was made for. */
+  const stub = () => {
+    const calls: { image: ImageFile; occlusion: Occlusion }[] = [];
+    const occlude = async (image: ImageFile, occlusion: Occlusion): Promise<ImageFile | null> => {
+      calls.push({ image, occlusion });
+      return { type: "image/png", data: new Uint8Array([0xca, occlusion.asked, occlusion.revealed ? 1 : 0]).buffer as ArrayBuffer };
+    };
+    return { calls, occlude };
+  };
+
+  const fields = (db: DatabaseSync, id: number) => (db.prepare("SELECT flds FROM notes WHERE id = ?").get(id)!.flds as string).split("\x1f");
+
+  it("covers the boxes: the front shows the question rendering, the back the solution rendering", async () => {
+    const { calls, occlude } = stub();
+    const settings = options();
+    const blob = await buildAnkiPackage([occlusionCard("c-occ", 1, START)], FOLDERS, { ...settings, occlude });
+    const buffer = await blob.arrayBuffer();
+
+    // Rendered once per side, from the original picture and the parsed boxes.
+    expect(settings.asked).toEqual([PNG_ID]);
+    expect(calls.map((call) => [call.image.type, call.occlusion.asked, call.occlusion.revealed])).toEqual([
+      ["image/png", 1, false],
+      ["image/png", 1, true],
+    ]);
+    expect(calls[0].occlusion.boxes).toEqual([
+      { x: 120, y: 340, w: 200, h: 80 },
+      { x: 500, y: 100, w: 150, h: 60 },
+    ]);
+
+    const { db } = await collection(buffer);
+    const [front, back] = fields(db, START);
+    const question = new RegExp(`^Was ist hier verdeckt\\?<br><br><img src="(kiku-${PNG_ID}-occ-[0-9a-f]{8}-1q\\.png)">$`).exec(front);
+    const answer = new RegExp(`^Antwort 1<br><br><img src="(kiku-${PNG_ID}-occ-[0-9a-f]{8}-1a\\.png)">$`).exec(back);
+    expect(question).not.toBeNull();
+    expect(answer).not.toBeNull();
+
+    // Both renderings are in the package; the bare picture is not, as no card shows it uncovered.
+    const zip = openZip(buffer);
+    const media = JSON.parse((await zip.text("media"))!) as Record<string, string>;
+    expect(Object.values(media).sort()).toEqual([question![1], answer![1]].sort());
+    const bytes = async (name: string) => [...(await zip.bytes(Object.keys(media).find((key) => media[key] === name)!))!];
+    expect(await bytes(question![1])).toEqual([0xca, 1, 0]);
+    expect(await bytes(answer![1])).toEqual([0xca, 1, 1]);
+  });
+
+  it("renders each combination of picture, boxes and asked box once and shares the bare picture", async () => {
+    const { calls, occlude } = stub();
+    const cards = [
+      occlusionCard("c-occ-0", 0, START),
+      occlusionCard("c-occ-1", 1, START + 1),
+      // Asks the same box again: no new rendering.
+      occlusionCard("c-occ-1-again", 1, START + 2),
+      card("c-plain", "heart", `Unverdeckt\n\n${img(PNG_ID)}`, `Noch einmal\n\n${img(PNG_ID)}`, START + 3),
+      // Other boxes on the same picture: its own files.
+      card("c-other", "heart", `![occ:10,10,100,100#0](kiku-img:${PNG_ID})`, `![occ:10,10,100,100#0r](kiku-img:${PNG_ID})`, START + 4),
+    ];
+    const buffer = await (await buildAnkiPackage(cards, FOLDERS, { ...options(), occlude })).arrayBuffer();
+    expect(calls).toHaveLength(6);
+
+    const { db } = await collection(buffer);
+    const file = (html: string) => /<img src="([^"]+)">/.exec(html)![1];
+    const [front0, back0] = fields(db, START);
+    const [front1, back1] = fields(db, START + 1);
+    const [front1Again, back1Again] = fields(db, START + 2);
+    const [frontPlain, backPlain] = fields(db, START + 3);
+    const [frontOther, backOther] = fields(db, START + 4);
+    expect([front1Again, back1Again]).toEqual([front1, back1]);
+    expect(file(frontPlain)).toBe(`kiku-${PNG_ID}.png`);
+    expect(file(backPlain)).toBe(`kiku-${PNG_ID}.png`);
+    const names = [front0, back0, front1, back1, frontOther, backOther].map(file);
+    expect(new Set(names).size).toBe(6);
+    expect(names.every((name) => name.startsWith(`kiku-${PNG_ID}-occ-`))).toBe(true);
+    // The hash in the name comes from the boxes alone, so the sides of one card share it.
+    expect(file(front1).replace(/1q\.png$/, "")).toBe(file(back1).replace(/1a\.png$/, ""));
+    expect(file(front1).replace(/-1q\.png$/, "")).toBe(file(front0).replace(/-0q\.png$/, ""));
+    expect(file(frontOther).replace(/-0q\.png$/, "")).not.toBe(file(front0).replace(/-0q\.png$/, ""));
+
+    const media = Object.values(JSON.parse((await openZip(buffer).text("media"))!) as Record<string, string>);
+    expect(media.sort()).toEqual([...names, `kiku-${PNG_ID}.png`].sort());
+
+    // Exporting again gives the same names.
+    const again = await collection(await (await buildAnkiPackage(cards, FOLDERS, { ...options(), occlude })).arrayBuffer());
+    expect(fields(again.db, START + 1)).toEqual([front1, back1]);
+  });
+
+  it("falls back to the bare picture without a renderer, or when rendering fails", async () => {
+    const cards = [occlusionCard("c-occ", 1, START)];
+    for (const occlude of [undefined, async () => null]) {
+      const buffer = await (await buildAnkiPackage(cards, FOLDERS, { ...options(), occlude })).arrayBuffer();
+      const { db } = await collection(buffer);
+      expect(fields(db, START)).toEqual([`Was ist hier verdeckt?<br><br><img src="kiku-${PNG_ID}.png">`, `Antwort 1<br><br><img src="kiku-${PNG_ID}.png">`]);
+      expect(JSON.parse((await openZip(buffer).text("media"))!)).toEqual({ 0: `kiku-${PNG_ID}.png` });
+    }
   });
 });

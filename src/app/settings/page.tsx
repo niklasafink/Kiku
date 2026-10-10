@@ -5,6 +5,8 @@ import { Download, Upload } from "lucide-react";
 import { useAccount } from "@/components/Account";
 import { AccountSettings } from "@/components/AccountSettings";
 import { exportAll, importAll } from "@/lib/repo";
+import { MAX_NEW_PER_DAY, setNewPerDay, useNewPerDay } from "@/lib/settings";
+import { NEW_PER_DAY } from "@/lib/srs";
 
 const THEMES = [
   { value: "", label: "System" },
@@ -41,6 +43,7 @@ export default function SettingsPage() {
     () => "",
   );
   const synced = useAccount().mode === "server";
+  const newPerDay = useNewPerDay();
   const fileInput = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
@@ -84,6 +87,33 @@ export default function SettingsPage() {
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="tile flex flex-col gap-4 p-5">
+        <h2 className="text-lg font-extrabold">Lernen</h2>
+        <label className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-bold">Neue Karten pro Tag</span>
+          <input
+            type="number"
+            className="input w-24"
+            min={1}
+            max={MAX_NEW_PER_DAY}
+            value={newPerDay}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              if (Number.isInteger(value) && value >= 1 && value <= MAX_NEW_PER_DAY) setNewPerDay(value);
+            }}
+          />
+          {newPerDay !== NEW_PER_DAY && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNewPerDay(NEW_PER_DAY)}>
+              Zurücksetzen ({NEW_PER_DAY})
+            </button>
+          )}
+        </label>
+        <p className="text-sm opacity-70">
+          So viele noch nie beantwortete Karten nimmt „Heute lernen“ pro Tag dazu, neben den fälligen Wiederholungen.
+          Ordner mit Prüfungstermin verteilen ihre neuen Karten stattdessen auf die Tage bis zur Prüfung. Gilt für dieses Gerät.
+        </p>
       </section>
 
       <AccountSettings />

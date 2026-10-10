@@ -3,7 +3,7 @@ import type { Database } from "./db";
 import { deleteUnusedImages, getImage, isImageId, putImage } from "./images";
 import { cards, images } from "./schema";
 import { eq } from "drizzle-orm";
-import { GENERATE_LIMITS, refundGenerateQuota, takeGenerateQuota } from "./quota";
+import { AI_LIMITS, GENERATE_LIMITS, periodOf, refundGenerateQuota, remainingQuota, takeGenerateQuota, takeQuota } from "./quota";
 import { createTestDb } from "./testDb";
 
 let db: Database;
@@ -84,5 +84,22 @@ describe("generation quota", () => {
 
     await refundGenerateQuota(db, "u1", "2026-10-10");
     expect(await takeGenerateQuota(db, "u1", "free", "2026-10-10")).toBe(0);
+  });
+});
+
+describe("monthly AI quota", () => {
+  it("is counted per month, reported without being used and stops at the limit", async () => {
+    expect(periodOf("ai", new Date("2026-10-10T12:00:00Z"))).toBe("2026-10");
+    expect(periodOf("generate", new Date("2026-10-10T12:00:00Z"))).toBe("2026-10-10");
+
+    expect(await remainingQuota(db, "ai", "u1", "paid", "2026-10")).toBe(AI_LIMITS.paid);
+    expect(await takeQuota(db, "ai", "u1", "paid", "2026-10")).toBe(AI_LIMITS.paid - 1);
+    expect(await remainingQuota(db, "ai", "u1", "paid", "2026-10")).toBe(AI_LIMITS.paid - 1);
+    for (let used = 2; used <= AI_LIMITS.paid; used++) await takeQuota(db, "ai", "u1", "paid", "2026-10");
+    expect(await takeQuota(db, "ai", "u1", "paid", "2026-10")).toBeNull();
+    expect(await remainingQuota(db, "ai", "u1", "paid", "2026-10")).toBe(0);
+    // Next month starts afresh; a free account has its own allowance.
+    expect(await takeQuota(db, "ai", "u1", "paid", "2026-11")).toBe(AI_LIMITS.paid - 1);
+    expect(await takeQuota(db, "ai", "u2", "free", "2026-10")).toBe(AI_LIMITS.free - 1);
   });
 });

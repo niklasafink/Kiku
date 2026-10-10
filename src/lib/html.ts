@@ -16,6 +16,11 @@ export function decodeEntities(text: string): string {
 const TAG = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
 const MARKS: Record<string, string> = { b: "**", strong: "**", i: "*", em: "*", mark: "==", code: "`" };
 const LIST_MARKER = /^\s*(?:- |\d+\. )$/;
+/**
+ * Attribute of the visual editor's formula element, which carries the TeX source; `data-display`
+ * says whether it is a `$$…$$` one. Ordinary HTML (Anki) never has it and is unaffected.
+ */
+export const MATH_ATTRIBUTE = "data-kiku-math";
 const BLOCKS = new Set(["div", "p", "ul", "ol", "blockquote", "pre", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6"]);
 
 function attribute(attributes: string, name: string): string | null {
@@ -87,7 +92,10 @@ export function htmlToMarkdown(
     const closing = match[1] === "/";
     const tag = match[2].toLowerCase();
 
+    const tex = closing ? null : attribute(match[3], MATH_ATTRIBUTE);
+
     if (tag === "br") emit("\n");
+    else if (tex !== null) emit(attribute(match[3], "data-display") === "true" ? `$$${tex}$$` : `$${tex}$`);
     else if (tag === "img") {
       const src = attribute(match[3], "src");
       if (!closing && src) emit(image(src, (name) => attribute(match[3], name)));

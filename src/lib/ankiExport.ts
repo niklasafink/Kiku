@@ -2,7 +2,8 @@
 // (collection.anki2 with schema 11, media list as JSON, nothing compressed with Zstandard),
 // because every Anki version on every platform still imports it.
 import { decodeEntities, markdownToHtml } from "./html";
-import { IMAGE_SCHEME, imageIds } from "./richText";
+import { occlusionAlt, parseOcclusion, type ImageFile, type Occlusion } from "./occlusion";
+import { IMAGE_SCHEME, imageRefs } from "./richText";
 import { writeSqlite, type SqlWriteValue } from "./sqliteWrite";
 import { pathTo } from "./tree";
 import type { Card, Folder } from "./types";
@@ -12,7 +13,13 @@ export interface AnkiExportOptions {
   /** Name of the deck above everything, used when the cards have no folder in common. */
   rootName: string;
   /** Looks up a picture of a card; null if it is gone. */
-  image: (id: string) => Promise<{ type: string; data: ArrayBuffer } | null>;
+  image: (id: string) => Promise<ImageFile | null>;
+  /**
+   * Paints the boxes of an image occlusion into a copy of the picture (renderOcclusion in the
+   * browser). Without it, or when it returns null, the bare picture is exported and the card
+   * gives its answer away.
+   */
+  occlude?: (image: ImageFile, occlusion: Occlusion) => Promise<ImageFile | null>;
 }
 
 // Anki's own statements for schema 11. The indexes Anki adds to them are left out: they only
@@ -270,12 +277,22 @@ function sortValue(text: string): SqlWriteValue {
   return BigInt.asIntN(64, exact) === exact ? exact : value;
 }
 
-const IMAGE_MARKUP = new RegExp(`!\\[[^\\]\\n]*\\]\\(${IMAGE_SCHEME}([A-Za-z0-9-]+)\\)`, "g");
+const IMAGE_MARKUP = new RegExp(`!\\[([^\\]\\n]*)\\]\\(${IMAGE_SCHEME}([A-Za-z0-9-]+)\\)`, "g");
 // Stands in for a picture while the text becomes HTML: private-use characters pass through the
 // conversion untouched and do not occur in ordinary text.
 const TOKEN_START = "\uE000";
 const TOKEN_END = "\uE001";
 const TOKEN = new RegExp(`${TOKEN_START}(\\d+)${TOKEN_END}`, "g");
+
+/**
+ * What a picture reference stands for in the package: the picture itself, or one rendering of
+ * an occlusion of it. The alternative text is re-spelt so that two spellings of the same boxes
+ * share a file.
+ */
+function mediaKey(id: string, alt: string): { key: string; occlusion: Occlusion | null } {
+  const occlusion = parseOcclusion(alt);
+  return { key: occlusion ? `${id}#${occlusionAlt(occlusion.boxes, occlusion.asked, occlusion.revealed)}` : id, occlusion };
+}
 
 /**
  * Card text as the HTML of a note field. markdownToHtml leaves pictures out, so each one is
@@ -284,8 +301,8 @@ const TOKEN = new RegExp(`${TOKEN_START}(\\d+)${TOKEN_END}`, "g");
  */
 function fieldHtml(text: string, files: Map<string, string>): string {
   const used: string[] = [];
-  const prepared = text.replaceAll(TOKEN_START, "").replace(IMAGE_MARKUP, (_whole, id: string) => {
-    const file = files.get(id);
+  const prepared = text.replaceAll(TOKEN_START, "").replace(IMAGE_MARKUP, (_whole, alt: string, id: string) => {
+    const file = files.get(mediaKey(id, alt).key);
     return file ? `${TOKEN_START}${used.push(file) - 1}${TOKEN_END}` : "";
   });
   // Anki stores text in this normal form and compares against it.
@@ -304,26 +321,62 @@ const EXTENSIONS: Record<string, string> = {
   "image/svg+xml": "svg",
 };
 
+const extensionOf = (type: string) => EXTENSIONS[type.split(";")[0].trim().toLowerCase()] ?? "png";
+
 interface Media {
   name: string;
   data: Uint8Array;
 }
 
-/** Fetches every picture the cards refer to, once. */
-async function collectMedia(cards: Card[], image: AnkiExportOptions["image"]): Promise<Map<string, Media>> {
-  const media = new Map<string, Media>();
-  const asked = new Set<string>();
+/**
+ * Fetches every picture the cards refer to, once, and renders every occlusion of it once. The
+ * result lists the files of the package and maps each media key (see mediaKey) to its file name;
+ * an occlusion that could not be rendered points at the bare picture.
+ */
+async function collectMedia(
+  cards: Card[],
+  image: AnkiExportOptions["image"],
+  occlude: AnkiExportOptions["occlude"],
+): Promise<{ media: Media[]; files: Map<string, string> }> {
+  const media: Media[] = [];
+  const files = new Map<string, string>();
+  const originals = new Map<string, ImageFile | null>();
+  // The bare picture only goes into the package once a card shows it uncovered (or a rendering
+  // fell through to it), so that no file sits unused in the collection.
+  const original = (id: string, found: ImageFile) => {
+    let name = files.get(id);
+    if (!name) {
+      name = `kiku-${id}.${extensionOf(found.type)}`;
+      files.set(id, name);
+      media.push({ name, data: new Uint8Array(found.data) });
+    }
+    return name;
+  };
   for (const card of cards) {
-    for (const id of imageIds(`${card.question}\n${card.solution}`)) {
-      if (asked.has(id)) continue;
-      asked.add(id);
-      const found = await image(id);
+    for (const { id, alt } of imageRefs(`${card.question}\n${card.solution}`)) {
+      const { key, occlusion } = mediaKey(id, alt);
+      if (files.has(key)) continue;
+      if (!originals.has(id)) originals.set(id, await image(id));
+      const found = originals.get(id);
       if (!found) continue;
-      const extension = EXTENSIONS[found.type.split(";")[0].trim().toLowerCase()] ?? "png";
-      media.set(id, { name: `kiku-${id}.${extension}`, data: new Uint8Array(found.data) });
+      if (!occlusion) {
+        original(id, found);
+        continue;
+      }
+      const rendered = occlude ? await occlude(found, occlusion) : null;
+      if (!rendered) {
+        files.set(key, original(id, found));
+        continue;
+      }
+      // The file name tells the renderings of one picture apart: a short hash of the boxes,
+      // the asked box and the side (q = question, a = answer). Stable across exports.
+      const boxes = leading(await sha1(occlusionAlt(occlusion.boxes, 0, false)), 4).toString(16).padStart(8, "0");
+      const name = `kiku-${id}-occ-${boxes}-${occlusion.asked}${occlusion.revealed ? "a" : "q"}.${extensionOf(rendered.type)}`;
+      files.set(key, name);
+      media.push({ name, data: new Uint8Array(rendered.data) });
     }
   }
-  return media;
+  return { media, files };
 }
 
 /** One level of a deck name. "::" separates levels in Anki and cannot be part of a name. */
@@ -377,8 +430,7 @@ export async function buildAnkiPackage(cards: Card[], folders: Folder[], options
   const now = Date.now();
   const seconds = Math.floor(now / 1000);
   const sorted = [...cards].sort((a, b) => timestamp(a.createdAt) - timestamp(b.createdAt));
-  const media = await collectMedia(sorted, options.image);
-  const files = new Map([...media].map(([id, entry]) => [id, entry.name]));
+  const { media, files } = await collectMedia(sorted, options.image, options.occlude);
   const names = deckNames(sorted, folders, deckLevel(options.rootName || "Kiku"));
   const decks = await deckIds(names.values());
 
@@ -425,7 +477,7 @@ export async function buildAnkiPackage(cards: Card[], folders: Folder[], options
   ]);
 
   // Media are stored under their position; the list maps positions to file names.
-  const mediaList = [...media.values()];
+  const mediaList = media;
   const zipFiles: ZipFile[] = [
     { name: "collection.anki2", data: database },
     { name: "media", data: encoder.encode(JSON.stringify(Object.fromEntries(mediaList.map((entry, i) => [i, entry.name])))) },

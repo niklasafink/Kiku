@@ -14,7 +14,8 @@ import { ScoreBadge, ScoreChart, Trend } from "@/components/score";
 import { db } from "@/lib/db";
 import { formatDateTime, inDays, pluralize } from "@/lib/format";
 import { useAllCards, useFolders } from "@/lib/hooks";
-import { attemptsForCard, deleteAttempt, deleteCard, updateCard } from "@/lib/repo";
+import { attemptsForCard, deleteAttempt, deleteCard, restoreDeleted, updateCard } from "@/lib/repo";
+import { showToast } from "@/lib/toast";
 import { toPlainText } from "@/lib/richText";
 import { daysUntil, scheduleOf } from "@/lib/srs";
 import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
@@ -232,7 +233,7 @@ export default function CardPage() {
       </section>
 
       <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Karte löschen?">
-        <p>Die Karte und ihr gesamter Verlauf werden gelöscht. Das lässt sich nicht rückgängig machen.</p>
+        <p>Die Karte und ihr gesamter Verlauf werden gelöscht. Du kannst das gleich danach noch rückgängig machen.</p>
         <div className="modal-action">
           <button className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>
             Abbrechen
@@ -240,11 +241,12 @@ export default function CardPage() {
           <button
             className="btn btn-error btn-chunky"
             onClick={async () => {
-              await deleteCard(card.id);
+              const deleted = await deleteCard(card.id);
               router.replace(`/f/${card.folderId}`);
+              showToast("Karte gelöscht.", { label: "Rückgängig", run: () => restoreDeleted(deleted) });
             }}
           >
-            Endgültig löschen
+            Löschen
           </button>
         </div>
       </Modal>

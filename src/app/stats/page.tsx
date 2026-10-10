@@ -5,6 +5,7 @@ import { useState } from "react";
 import { CalendarDays, Flame, Target, TrendingUp } from "lucide-react";
 import { formatDate, pluralize } from "@/lib/format";
 import { useAllCards, useAttemptLog, useFolders, useSchedules } from "@/lib/hooks";
+import { useNewPerDay } from "@/lib/settings";
 import { DAY, planToday } from "@/lib/srs";
 import { activity, averageScore, dueForecast, streakOf, type DayActivity } from "@/lib/stats";
 
@@ -95,6 +96,7 @@ export default function StatsPage() {
   const cards = useAllCards();
   const folders = useFolders();
   const schedules = useSchedules();
+  const newPerDay = useNewPerDay();
   const [now] = useState(() => Date.now());
 
   if (!log || !cards || !folders || !schedules) return <div className="skeleton h-64 w-full rounded-box" />;
@@ -102,7 +104,7 @@ export default function StatsPage() {
   const streak = streakOf(log.map((a) => a.createdAt), now);
   const days = activity(log, now, WEEKS * 7);
   const todayAnswers = days.at(-1)!.answers;
-  const plan = planToday(cards, schedules, folders, now);
+  const plan = planToday(cards, schedules, folders, now, newPerDay);
   const open = plan.due.length + plan.fresh.length;
   const week = averageScore(log, now - 7 * DAY, now);
   const before = averageScore(log, now - 14 * DAY, now - 7 * DAY);

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "./db";
 import { MAX_TAG_LENGTH, MAX_TAGS } from "./syncProtocol";
 import { descendantIds } from "./tree";
-import type { Attempt, Card, Folder, SavedSession } from "./types";
+import type { Attempt, Card, Folder, PendingAnswer, SavedSession } from "./types";
 
 export function newId(): string {
   // crypto.randomUUID only exists in secure contexts (https / localhost).
@@ -41,15 +41,62 @@ export async function moveFolder(id: string, parentId: string | null): Promise<v
   });
 }
 
+/** What a deletion removed, so that it can be undone. */
+export interface Deleted {
+  folders: Folder[];
+  cards: Card[];
+  attempts: Attempt[];
+}
+
 /** Deletes the folder, all nested folders, their cards and those cards' attempts. */
-export async function deleteFolderRecursive(id: string): Promise<void> {
-  await db.transaction("rw", db.folders, db.cards, db.attempts, db.sessions, async () => {
+export async function deleteFolderRecursive(id: string): Promise<Deleted> {
+  return db.transaction("rw", db.folders, db.cards, db.attempts, db.sessions, async () => {
     const folderIds = descendantIds(await db.folders.toArray(), id);
-    const cardIds = await db.cards.where("folderId").anyOf(folderIds).primaryKeys();
-    await db.attempts.where("cardId").anyOf(cardIds).delete();
+    const folders = await db.folders.bulkGet(folderIds);
+    const cards = await db.cards.where("folderId").anyOf(folderIds).toArray();
+    const cardIds = cards.map((card) => card.id);
+    const attempts = await db.attempts.where("cardId").anyOf(cardIds).toArray();
+    await db.attempts.bulkDelete(attempts.map((attempt) => attempt.id));
     await db.cards.bulkDelete(cardIds);
     await db.folders.bulkDelete(folderIds);
     await db.sessions.bulkDelete(folderIds.flatMap((f) => STUDY_MODES.map((mode) => sessionKey(f, mode))));
+    return { folders: folders.filter((folder) => folder !== undefined), cards, attempts };
+  });
+}
+
+/**
+ * Puts deleted rows back. They count as changed now, so on the server they win against the
+ * deletion that may already have been sent (see applyDeletions in src/server/sync.ts).
+ */
+export async function restoreDeleted({ folders, cards, attempts }: Deleted): Promise<void> {
+  const now = Date.now();
+  await db.transaction("rw", db.folders, db.cards, db.attempts, async () => {
+    await db.folders.bulkPut(folders.map((folder) => ({ ...folder, updatedAt: now })));
+    await db.cards.bulkPut(cards.map((card) => ({ ...card, updatedAt: now })));
+    await db.attempts.bulkPut(attempts.map((attempt) => ({ ...attempt, updatedAt: now })));
+  });
+}
+
+/** Moves cards into another folder. */
+export async function moveCards(ids: string[], folderId: string): Promise<void> {
+  const now = Date.now();
+  await db.transaction("rw", db.cards, db.folders, async () => {
+    if (!(await db.folders.get(folderId))) throw new Error("Der Zielordner existiert nicht mehr.");
+    await db.cards.where("id").anyOf(ids).modify({ folderId, updatedAt: now });
+  });
+}
+
+/** Gives every card the tag, where it does not have it yet. */
+export async function addTagToCards(ids: string[], tag: string): Promise<void> {
+  const clean = cleanTag(tag);
+  if (!clean) return;
+  const key = clean.toLocaleLowerCase("de");
+  await db.transaction("rw", db.cards, async () => {
+    for (const card of await db.cards.bulkGet(ids)) {
+      const tags = card?.tags ?? [];
+      if (!card || tags.some((t) => t.toLocaleLowerCase("de") === key) || tags.length >= MAX_TAGS) continue;
+      await db.cards.update(card.id, { tags: [...tags, clean], updatedAt: Date.now() });
+    }
   });
 }
 
@@ -124,15 +171,22 @@ export async function toggleCardTag(id: string, tag: string): Promise<void> {
   await setCardTags(id, tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag]);
 }
 
-export async function deleteCard(id: string): Promise<void> {
-  await db.transaction("rw", db.cards, db.attempts, async () => {
-    await db.attempts.where("cardId").equals(id).delete();
-    await db.cards.delete(id);
+/** Deletes cards with their attempts. */
+export async function deleteCards(ids: string[]): Promise<Deleted> {
+  return db.transaction("rw", db.cards, db.attempts, async () => {
+    const cards = (await db.cards.bulkGet(ids)).filter((card) => card !== undefined);
+    const attempts = await db.attempts.where("cardId").anyOf(ids).toArray();
+    await db.attempts.bulkDelete(attempts.map((attempt) => attempt.id));
+    await db.cards.bulkDelete(ids);
+    return { folders: [], cards, attempts };
   });
 }
 
-export async function addAttempt(attempt: Omit<Attempt, "id" | "createdAt">): Promise<Attempt> {
-  const full: Attempt = { ...attempt, id: newId(), createdAt: Date.now() };
+export const deleteCard = (id: string) => deleteCards([id]);
+
+/** Stores an attempt; `createdAt` is given for an answer that waited for a connection. */
+export async function addAttempt(attempt: Omit<Attempt, "id" | "createdAt"> & { createdAt?: number }): Promise<Attempt> {
+  const full: Attempt = { ...attempt, id: newId(), createdAt: attempt.createdAt ?? Date.now() };
   await db.attempts.add(full);
   return full;
 }
@@ -163,8 +217,11 @@ export async function latestAttempts(cardIds: string[]): Promise<Map<string, Att
   return latest;
 }
 
-/** What a study session over a folder covers: every card, the weak ones, or what is planned for today. */
-export const STUDY_MODES = ["all", "weak", "due"] as const;
+/**
+ * What a study session over a folder covers: every card, the weak ones, what is planned for
+ * today, or an exam simulation (a random draw, graded at the end).
+ */
+export const STUDY_MODES = ["all", "weak", "due", "exam"] as const;
 export type StudyMode = (typeof STUDY_MODES)[number];
 
 /** Key of the resumable session for studying a folder, separately for each mode. */
@@ -182,6 +239,21 @@ export async function saveSession(session: Omit<SavedSession, "updatedAt">): Pro
 
 export async function clearSession(key: string): Promise<void> {
   await db.sessions.delete(key);
+}
+
+/** Keeps an answer given without a network until it can be graded. */
+export async function queuePendingAnswer(entry: Omit<PendingAnswer, "id" | "createdAt">): Promise<PendingAnswer> {
+  const full: PendingAnswer = { ...entry, id: newId(), createdAt: Date.now() };
+  await db.pending.add(full);
+  return full;
+}
+
+export async function pendingAnswers(): Promise<PendingAnswer[]> {
+  return (await db.pending.toArray()).sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export async function deletePendingAnswer(id: string): Promise<void> {
+  await db.pending.delete(id);
 }
 
 const segmentSchema = z.object({

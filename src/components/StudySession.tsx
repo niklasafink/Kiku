@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Eye, GraduationCap, Headphones, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CloudOff, Eye, GraduationCap, Headphones, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, X } from "lucide-react";
 import { useAccount } from "@/components/Account";
 import { GradedSolution } from "@/components/GradedSolution";
 import { Handwriting } from "@/components/Handwriting";
@@ -11,12 +11,14 @@ import { CardImages, RichText } from "@/components/RichText";
 import { ScoreBadge, Trend, scoreTone } from "@/components/score";
 import { LiveStar } from "@/components/Tags";
 import { inDays } from "@/lib/format";
-import { hasInk, recognizeInk, type Stroke } from "@/lib/ink";
+import { hasInk, recognizeInk } from "@/lib/ink";
 import { canSpeak, speak, stopSpeaking } from "@/lib/speak";
-import { addAttempt, attemptsForCard, clearSession, latestAttempt, saveSession } from "@/lib/repo";
+import { isOffline } from "@/lib/pendingGrades";
+import { addAttempt, attemptsForCard, clearSession, latestAttempt, queuePendingAnswer, saveSession } from "@/lib/repo";
 import { toPlainText } from "@/lib/richText";
 import { daysUntil, scheduleOf } from "@/lib/srs";
 import { shuffled } from "@/lib/study";
+import { showToast } from "@/lib/toast";
 import type { Card, InputMode, Segment, StudyCardState } from "@/lib/types";
 
 type CardState = StudyCardState;
@@ -37,7 +39,12 @@ function storedMode(): AnswerMode {
   }
 }
 
-const inputModeOf = (state: CardState): InputMode => (state.usedPen ? "pen" : state.usedVoice ? "voice" : "text");
+const inputModeOf = (state: CardState): InputMode => (state.usedPen || hasInk(state.ink) ? "pen" : state.usedVoice ? "voice" : "text");
+
+/** Delay before a changed session is written; handwriting changes it with every stroke. */
+const SAVE_DELAY = 400;
+/** Once this few gradings are left in the month, the number is shown after every answer. */
+const SHOW_REMAINING_BELOW = 25;
 
 /** Answers graded at the same time when an exam is handed in. */
 const EXAM_PARALLEL = 3;
@@ -54,6 +61,7 @@ function praise(score: number): string {
  * back and forth freely, and each card keeps its answer and result for the session.
  * With a sessionKey the progress is stored, so the session can be continued later.
  * As an exam, nothing is graded or shown until every card is handed in at the end.
+ * Without a network an answer is queued and graded later (src/lib/pendingGrades.ts).
  */
 export function StudySession({
   cards: initialCards,
@@ -82,9 +90,8 @@ export function StudySession({
   const [handsFree, setHandsFree] = useState(false);
   const [listen, setListen] = useState(0);
   const [mode, setMode] = useState<AnswerMode>(storedMode);
-  // What was written by hand per card and not read yet. Kept here, not in the saved session:
-  // strokes are large, and reading them turns them into the answer text that is saved.
-  const [ink, setInk] = useState<Record<string, Stroke[]>>({});
+  // Gradings left in the month, as the server reported it with the last answer.
+  const [remaining, setRemaining] = useState<{ remaining: number; limit: number } | null>(null);
   const account = useAccount();
   // Free accounts dictate with the browser's speech recognition; the server only transcribes for paid ones.
   const browserDictation = account.mode === "server" && account.user?.plan === "free";
@@ -103,16 +110,18 @@ export function StudySession({
     setIndex(Math.max(0, Math.min(cards.length, to)));
   }
 
-  // A session is worth keeping once something happened in it and until the summary is reached.
+  // A session is worth keeping once something happened in it and until the summary is reached;
+  // an exam also while it waits to be handed in.
   useEffect(() => {
     if (!sessionKey) return;
-    const started = index > 0 || Object.values(states).some((s) => s.attempt || s.revealed || s.answer.trim());
-    if (started && index < cards.length) {
-      void saveSession({ key: sessionKey, cardIds: cards.map((c) => c.id), index, states });
-    } else {
-      void clearSession(sessionKey);
+    const started =
+      index > 0 || Object.values(states).some((s) => s.attempt || s.revealed || s.pending || s.answer.trim() || hasInk(s.ink));
+    if (started && (index < cards.length || (exam && !handedIn))) {
+      const timer = setTimeout(() => void saveSession({ key: sessionKey, cardIds: cards.map((c) => c.id), index, states }), SAVE_DELAY);
+      return () => clearTimeout(timer);
     }
-  }, [sessionKey, cards, index, states]);
+    void clearSession(sessionKey);
+  }, [sessionKey, cards, index, states, exam, handedIn]);
 
   // Arrow keys move between cards unless the cursor is in a text field.
   useEffect(() => {
@@ -141,15 +150,30 @@ export function StudySession({
    */
   async function answerOf(target: Card): Promise<{ answer: string; mode: InputMode }> {
     const current = states[target.id] ?? EMPTY;
-    const strokes = ink[target.id];
+    const strokes = current.ink ?? [];
     if (!hasInk(strokes)) return { answer: current.answer, mode: inputModeOf(current) };
 
     const written = await recognizeInk(strokes);
     const answer = [current.answer.trim(), written].filter(Boolean).join(" ");
     if (!answer) throw new Error("In deiner Handschrift war kein Text zu erkennen. Schreib etwas größer oder deutlicher.");
-    patch(target.id, { answer, usedPen: true });
-    setInk((all) => ({ ...all, [target.id]: [] }));
+    patch(target.id, { answer, usedPen: true, ink: [] });
     return { answer, mode: "pen" };
+  }
+
+  /** Without a network: the answer (text and handwriting as it is) goes into the queue for later. */
+  async function queueOffline(target: Card, spoken?: string) {
+    const current = states[target.id] ?? EMPTY;
+    const answer = (spoken ?? current.answer).trim();
+    const strokes = hasInk(current.ink) ? current.ink : undefined;
+    await queuePendingAnswer({
+      cardId: target.id,
+      inputMode: spoken ? "voice" : inputModeOf(current),
+      answer,
+      ...(strokes ? { ink: strokes } : {}),
+      question: target.question,
+      solutionSnapshot: target.solution,
+    });
+    patch(target.id, { answer, pending: true, ink: [] });
   }
 
   /** Lets the AI compare one answer with the solution and stores the attempt. Throws if that fails. */
@@ -162,6 +186,9 @@ export function StudySession({
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
+    if (typeof data.remaining === "number" && typeof data.limit === "number") {
+      setRemaining({ remaining: data.remaining, limit: data.limit });
+    }
 
     const previous = await latestAttempt(target.id);
     const attempt = await addAttempt({
@@ -245,18 +272,13 @@ export function StudySession({
   }
 
   /** Something was said, typed or written for this card. */
-  const isAnswered = (c: Card) => Boolean(states[c.id]?.answer.trim()) || hasInk(ink[c.id]);
+  const isAnswered = (c: Card) => Boolean(states[c.id]?.answer.trim()) || hasInk(states[c.id]?.ink) || Boolean(states[c.id]?.pending);
 
-  const failure = (e: unknown) =>
-    !navigator.onLine
-      ? "Du bist offline. Die Auswertung braucht Internet; mit „Lösung zeigen“ kannst du dich selbst prüfen."
-      : e instanceof Error && e.message
-        ? e.message
-        : "Die Auswertung ist fehlgeschlagen.";
+  const failure = (e: unknown) => (e instanceof Error && e.message ? e.message : "Die Auswertung ist fehlgeschlagen.");
 
   /** `spoken` is an answer that was just transcribed and is not in the state yet (hands-free). */
   async function grade(target: Card, spoken?: string) {
-    if (grading || !(spoken || states[target.id]?.answer.trim() || hasInk(ink[target.id]))) return;
+    if (grading || !(spoken || states[target.id]?.answer.trim() || hasInk(states[target.id]?.ink))) return;
     if (!toPlainText(target.solution)) {
       setError("Die Lösung dieser Karte besteht nur aus Bildern und lässt sich nicht automatisch abgleichen. Nutze „Lösung zeigen“.");
       return;
@@ -267,19 +289,28 @@ export function StudySession({
       const { answer, mode: inputMode } = spoken ? { answer: spoken, mode: "voice" as const } : await answerOf(target);
       await evaluate(target, answer, inputMode);
     } catch (e) {
-      setError(failure(e));
+      if (isOffline(e)) {
+        await queueOffline(target, spoken);
+        showToast("Du bist offline. Die Antwort ist gespeichert und wird ausgewertet, sobald du wieder online bist.");
+      } else {
+        setError(failure(e));
+      }
       setHandsFree(false);
     } finally {
       setGradingId(null);
     }
   }
 
-  /** Grades every answer of the exam. After a failure the rest can be handed in again. */
+  /**
+   * Grades every answer of the exam. After a failure the rest can be handed in again; without
+   * a network the answers are queued and the result comes once there is one.
+   */
   async function handIn() {
-    const open = cards.filter((c) => isAnswered(c) && !states[c.id]?.attempt && toPlainText(c.solution));
+    const open = cards.filter((c) => isAnswered(c) && !states[c.id]?.attempt && !states[c.id]?.pending && toPlainText(c.solution));
     setError(null);
     setHandingIn(true);
     let failed: string | null = null;
+    let queued = 0;
     let next = 0;
     const worker = async () => {
       while (next < open.length && failed === null) {
@@ -288,14 +319,20 @@ export function StudySession({
           const { answer, mode: inputMode } = await answerOf(target);
           await evaluate(target, answer, inputMode);
         } catch (e) {
-          failed = failure(e);
+          if (isOffline(e)) {
+            await queueOffline(target);
+            queued++;
+          } else {
+            failed = failure(e);
+          }
         }
       }
     };
     await Promise.all(Array.from({ length: EXAM_PARALLEL }, worker));
     setHandingIn(false);
-    if (failed === null) setHandedIn(true);
-    else setError(failed);
+    if (failed !== null) return setError(failed);
+    setHandedIn(true);
+    if (queued > 0) showToast(`Du bist offline. ${queued === 1 ? "Eine Antwort wird" : `${queued} Antworten werden`} ausgewertet, sobald du wieder online bist.`);
   }
 
   if (!card && !handedIn) {
@@ -395,6 +432,10 @@ export function StudySession({
                   <span className="line-clamp-1 min-w-0 flex-1 font-bold">{toPlainText(c.question)}</span>
                   {attempt ? (
                     <ScoreBadge score={attempt.score} />
+                  ) : states[c.id]?.pending ? (
+                    <span className="badge badge-ghost gap-1 font-bold">
+                      <CloudOff className="size-3.5" aria-hidden /> Wartet auf Netz
+                    </span>
                   ) : (
                     <span className="badge badge-ghost font-bold">Offen</span>
                   )}
@@ -411,7 +452,6 @@ export function StudySession({
             className="btn btn-chunky bg-base-100"
             onClick={() => {
               setStates({});
-              setInk({});
               setIndex(0);
               setHandedIn(!exam);
             }}
@@ -428,9 +468,9 @@ export function StudySession({
 
   const answered = cards.filter((c) => (handedIn ? states[c.id]?.attempt : isAnswered(c))).length;
   const { attempt } = state;
-  const strokes = ink[card.id] ?? [];
+  const strokes = state.ink ?? [];
   // Writing by hand needs room: the answer side gets two thirds of the width.
-  const writing = mode === "pen" && !attempt && !state.revealed;
+  const writing = mode === "pen" && !attempt && !state.revealed && !state.pending;
 
   return (
     <div className="flex flex-col gap-4">
@@ -533,6 +573,11 @@ export function StudySession({
                   {state.nextDue !== undefined && (
                     <p className="text-sm opacity-70">Nächste Wiederholung {inDays(daysUntil(state.nextDue, attempt.createdAt))}.</p>
                   )}
+                  {remaining && remaining.remaining < SHOW_REMAINING_BELOW && (
+                    <p className="text-sm font-semibold text-warning">
+                      Noch {remaining.remaining} von {remaining.limit} KI-Auswertungen in diesem Monat.
+                    </p>
+                  )}
                 </div>
               </section>
               <section className="tile p-5">
@@ -570,6 +615,17 @@ export function StudySession({
                 )
               )}
             </section>
+          ) : state.pending ? (
+            <section className="tile pop-in flex flex-col gap-3 p-5">
+              <h2 className={`flex items-center gap-1.5 ${LABEL}`}>
+                <CloudOff className="size-3.5" aria-hidden /> Antwort gespeichert
+              </h2>
+              <p>
+                Du warst offline. Die Antwort wird ausgewertet, sobald das Gerät wieder eine Verbindung hat; das Ergebnis
+                findest du dann im Verlauf der Karte.
+              </p>
+              {state.answer && <p className="whitespace-pre-wrap text-sm opacity-80">{state.answer}</p>}
+            </section>
           ) : state.revealed ? (
             <section className="tile pop-in p-5">
               <h2 className={`mb-1.5 ${LABEL}`}>Lösung</h2>
@@ -601,11 +657,7 @@ export function StudySession({
               </div>
               {mode === "pen" ? (
                 <>
-                  <Handwriting
-                    strokes={strokes}
-                    onChange={(next) => setInk((all) => ({ ...all, [card.id]: next }))}
-                    disabled={grading}
-                  />
+                  <Handwriting strokes={strokes} onChange={(next) => patch(card.id, { ink: next })} disabled={grading} />
                   <p className="text-sm opacity-70">
                     {handedIn
                       ? "Mit „Fertig“ liest die KI deine Handschrift und gleicht sie mit der Lösung ab."
@@ -670,17 +722,13 @@ export function StudySession({
               <button className="btn btn-primary btn-chunky flex-1" onClick={() => go(index + 1)} title="⌘/Strg + Enter">
                 {index + 1 < cards.length ? "Weiter" : "Zur Abgabe"} <ArrowRight className="size-4" />
               </button>
-            ) : attempt || state.revealed ? (
+            ) : attempt || state.revealed || state.pending ? (
               <>
-                <button
-                  className="btn btn-chunky bg-base-100"
-                  onClick={() => {
-                    patch(card.id, { ...EMPTY, usedPen: false });
-                    setInk((all) => ({ ...all, [card.id]: [] }));
-                  }}
-                >
-                  <RotateCcw className="size-4" /> {attempt ? "Nochmal" : "Doch antworten"}
-                </button>
+                {!state.pending && (
+                  <button className="btn btn-chunky bg-base-100" onClick={() => patch(card.id, { ...EMPTY, usedPen: false, ink: [] })}>
+                    <RotateCcw className="size-4" /> {attempt ? "Nochmal" : "Doch antworten"}
+                  </button>
+                )}
                 <button className="btn btn-primary btn-chunky flex-1" onClick={() => go(index + 1)}>
                   {index + 1 < cards.length ? "Weiter" : "Abschließen"} <ArrowRight className="size-4" />
                 </button>

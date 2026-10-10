@@ -8,6 +8,7 @@ import { StudySession } from "@/components/StudySession";
 import { formatDateTime } from "@/lib/format";
 import { useAllCards, useFolders, useLatestAttempts, useSchedules } from "@/lib/hooks";
 import { loadSession, sessionKey, type StudyMode } from "@/lib/repo";
+import { useNewPerDay } from "@/lib/settings";
 import { planToday } from "@/lib/srs";
 import { EXAM_CARDS, isWeak, shuffled } from "@/lib/study";
 import { descendantIds } from "@/lib/tree";
@@ -19,26 +20,19 @@ const EMPTY: Record<StudyMode, string> = {
   all: "In diesem Ordner gibt es noch keine Karten.",
   weak: "Keine schwachen Karten mehr. Alles sitzt!",
   due: "Für heute ist alles erledigt.",
+  exam: "In diesem Ordner gibt es noch keine Karten.",
 };
 
-function FolderSession({
-  folderId,
-  mode,
-  autoResume,
-  exam,
-}: {
-  folderId: string;
-  mode: StudyMode;
-  autoResume: boolean;
-  /** Exam simulation: a random draw, graded at the end. It is not stored for later. */
-  exam: boolean;
-}) {
+function FolderSession({ folderId, mode, autoResume }: { folderId: string; mode: StudyMode; autoResume: boolean }) {
+  // Exam simulation: a random draw, graded at the end. Stored like the others until it is handed in.
+  const exam = mode === "exam";
   const folders = useFolders();
   const allCards = useAllCards();
   const latest = useLatestAttempts();
   const schedules = useSchedules();
   const backHref = `/f/${folderId}`;
   const key = sessionKey(folderId, mode);
+  const newPerDay = useNewPerDay();
   const [now] = useState(() => Date.now());
 
   // Read once: the running session keeps writing to this entry.
@@ -62,7 +56,7 @@ function FolderSession({
   const byId = new Map(allCards.map((c) => [c.id, c]));
   const savedCards = saved ? saved.cardIds.flatMap((id) => byId.get(id) ?? []) : [];
 
-  if (!exam && saved && savedCards.length > 0 && choice !== "fresh") {
+  if (saved && savedCards.length > 0 && choice !== "fresh") {
     const index = Math.max(0, savedCards.findIndex((c) => c.id === saved.cardIds[saved.index]));
     if (choice === "resume") {
       return (
@@ -72,14 +66,15 @@ function FolderSession({
           backHref={backHref}
           sessionKey={key}
           initial={{ index, states: saved.states }}
+          exam={exam}
         />
       );
     }
 
-    const answered = savedCards.filter((c) => saved.states[c.id]?.attempt).length;
+    const answered = savedCards.filter((c) => saved.states[c.id]?.attempt || saved.states[c.id]?.answer.trim() || saved.states[c.id]?.ink?.length).length;
     return (
       <div className="tile pop-in mx-auto flex w-full max-w-xl flex-col items-center gap-1.5 p-8 text-center">
-        <h1 className="text-2xl font-black">Weitermachen, wo du warst?</h1>
+        <h1 className="text-2xl font-black">{exam ? "Prüfung fortsetzen?" : "Weitermachen, wo du warst?"}</h1>
         <p>
           Karte {index + 1} von {savedCards.length}, {answered} beantwortet
         </p>
@@ -103,7 +98,7 @@ function FolderSession({
       setFresh(shuffled(inFolder).slice(0, EXAM_CARDS));
     } else if (mode === "due") {
       // Repetitions first: they are the ones that slip away if the day runs out.
-      const today = planToday(inFolder, schedules, folders, now);
+      const today = planToday(inFolder, schedules, folders, now, newPerDay);
       setFresh([...today.due, ...today.fresh]);
     } else {
       setFresh(mode === "weak" ? inFolder.filter((c) => isWeak(latest.get(c.id))) : inFolder);
@@ -122,24 +117,15 @@ function FolderSession({
     );
   }
 
-  return <StudySession key="fresh" cards={fresh} backHref={backHref} sessionKey={exam ? undefined : key} exam={exam} />;
+  return <StudySession key="fresh" cards={fresh} backHref={backHref} sessionKey={key} exam={exam} />;
 }
 
 function FolderLearn() {
   const { folderId } = useParams<{ folderId: string }>();
   const params = useSearchParams();
-  const requested = params.get("mode");
-  const mode: StudyMode = requested === "weak" || requested === "due" ? requested : "all";
-  const exam = params.get("exam") === "1";
-  return (
-    <FolderSession
-      key={`${folderId}-${mode}-${exam}`}
-      folderId={folderId}
-      mode={mode}
-      autoResume={params.get("resume") === "1"}
-      exam={exam}
-    />
-  );
+  const requested = params.get("exam") === "1" ? "exam" : params.get("mode");
+  const mode: StudyMode = requested === "weak" || requested === "due" || requested === "exam" ? requested : "all";
+  return <FolderSession key={`${folderId}-${mode}`} folderId={folderId} mode={mode} autoResume={params.get("resume") === "1"} />;
 }
 
 export default function FolderLearnPage() {

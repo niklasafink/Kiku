@@ -6,6 +6,7 @@ import { useState } from "react";
 import {
   CalendarClock,
   CalendarDays,
+  CheckSquare,
   Download,
   Eye,
   EyeOff,
@@ -15,6 +16,8 @@ import {
   FolderPlus,
   GraduationCap,
   History,
+  ListChecks,
+  Mic,
   MoreHorizontal,
   Pencil,
   Play,
@@ -22,16 +25,19 @@ import {
   ScanEye,
   Share2,
   Sparkles,
+  Tag as TagIcon,
   Target,
+  TextCursorInput,
   Trash2,
 } from "lucide-react";
 import { useAccount } from "@/components/Account";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CardRow } from "@/components/CardRow";
-import { CardForm, ExamForm, FolderForm, MoveFolderForm } from "@/components/forms";
+import { CardForm, ExamForm, FolderForm, MoveCardsForm, MoveFolderForm, TagCardsForm } from "@/components/forms";
 import { GenerateForm } from "@/components/GenerateForm";
 import { ImportForm } from "@/components/ImportForm";
 import { Modal } from "@/components/Modal";
+import { ClozeForm } from "@/components/ClozeForm";
 import { OcclusionForm } from "@/components/OcclusionForm";
 import { ShareForm } from "@/components/ShareForm";
 import { tagCounts, TagFilter } from "@/components/Tags";
@@ -42,26 +48,50 @@ import { downloadFile, exportCards, fileName, type ExportFormat } from "@/lib/ex
 import { formatDate, inDays, pluralize } from "@/lib/format";
 import { imageUrl } from "@/lib/images";
 import { useAllCards, useAttemptLog, useFolders, useLatestAttempts, useSavedSession, useSchedules } from "@/lib/hooks";
+import { renderOcclusion } from "@/lib/occlusion";
 import {
+  addTagToCards,
   createCard,
   createCards,
   createFolder,
+  deleteCards,
   deleteFolderRecursive,
+  moveCards,
   moveFolder,
+  restoreDeleted,
   setExamDate,
   updateFolder,
 } from "@/lib/repo";
+import { useNewPerDay } from "@/lib/settings";
 import { daysUntil, examDates, planToday } from "@/lib/srs";
+import { createSampleFolder } from "@/lib/sample";
+import { showToast } from "@/lib/toast";
 import { streakOf } from "@/lib/stats";
 import { EXAM_CARDS, isWeak } from "@/lib/study";
 import { childrenOf, descendantIds } from "@/lib/tree";
 
-type Dialog = "folder" | "card" | "import" | "generate" | "export" | "exam" | "share" | "occlusion" | "rename" | "move" | "delete" | null;
+type Dialog =
+  | "folder"
+  | "card"
+  | "import"
+  | "generate"
+  | "export"
+  | "exam"
+  | "share"
+  | "occlusion"
+  | "cloze"
+  | "rename"
+  | "move"
+  | "delete"
+  | "moveCards"
+  | "tagCards"
+  | "deleteCards"
+  | null;
 
 /** Cards rendered at first and added per click; a folder can hold thousands after an import. */
 const CARDS_PAGE = 60;
 
-const MODE_QUERY = { all: "", weak: "mode=weak&", due: "mode=due&" } as const;
+const MODE_QUERY = { all: "", weak: "mode=weak&", due: "mode=due&", exam: "mode=exam&" } as const;
 
 
 const SECTION_HEADING = "text-xs font-extrabold tracking-wide uppercase opacity-60";
@@ -97,7 +127,11 @@ export function FolderView({ folderId }: { folderId: string | null }) {
   const [showSolutions, setShowSolutions] = useState(true);
   const [shown, setShown] = useState(CARDS_PAGE);
   const [tag, setTag] = useState<string | null>(null);
+  // Several cards at once: null while not selecting, otherwise the ids chosen so far.
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const [chosenCount, setChosenCount] = useState(0);
   const [now] = useState(() => Date.now());
+  const newPerDay = useNewPerDay();
   const closeDialog = () => setDialog(null);
 
   if (!folders || !allCards || !latest || !schedules) {
@@ -133,8 +167,21 @@ export function FolderView({ folderId }: { folderId: string | null }) {
   const isEmpty = subfolders.length === 0 && cards.length === 0;
   const tags = tagCounts(cards);
   const visible = tag ? cards.filter((c) => c.tags?.includes(tag)) : cards;
-  const today = planToday(scope, schedules, folders, now);
+  const today = planToday(scope, schedules, folders, now, newPerDay);
   const todayCount = today.due.length + today.fresh.length;
+  const chosen = selected ? visible.filter((c) => selected.has(c.id)) : [];
+  // The dialogs name the number of chosen cards; it must not flip to 0 while a dialog fades out after acting.
+  const openCardsDialog = (kind: Dialog) => {
+    setChosenCount(chosen.length);
+    setDialog(kind);
+  };
+  const toggle = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   // The exam this folder studies towards: its own date or one inherited from a parent.
   const exam = folder ? examDates(folders, now).get(folder.id) : undefined;
 
@@ -183,6 +230,11 @@ export function FolderView({ folderId }: { folderId: string | null }) {
                 <li>
                   <button onClick={() => setDialog("move")}>
                     <FolderInput className="size-4" /> Verschieben
+                  </button>
+                </li>
+                <li>
+                  <button onClick={() => setDialog("cloze")}>
+                    <TextCursorInput className="size-4" /> Karten aus Lückentext
                   </button>
                 </li>
                 <li>
@@ -239,10 +291,10 @@ export function FolderView({ folderId }: { folderId: string | null }) {
             <Link
               href={`/f/${folder.id}/learn?${MODE_QUERY[savedSession.mode]}resume=1`}
               className="btn btn-chunky bg-base-100"
-              title="Unterbrochene Lernsitzung fortsetzen"
+              title={savedSession.mode === "exam" ? "Unterbrochene Prüfung fortsetzen" : "Unterbrochene Lernsitzung fortsetzen"}
             >
               <History className="size-4" />
-              Fortsetzen
+              {savedSession.mode === "exam" ? "Prüfung fortsetzen" : "Fortsetzen"}
               <span className="badge badge-sm badge-ghost tabular-nums">
                 {savedSession.index + 1}/{savedSession.cardIds.length}
               </span>
@@ -261,7 +313,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
           )}
           {folder && scope.length > 1 && (
             <Link
-              href={`/f/${folder.id}/learn?exam=1`}
+              href={`/f/${folder.id}/learn?mode=exam`}
               className="btn btn-chunky bg-base-100"
               title={`Bis zu ${EXAM_CARDS} zufällige Karten ohne Hilfen, die Auswertung kommt erst am Ende`}
             >
@@ -297,21 +349,20 @@ export function FolderView({ folderId }: { folderId: string | null }) {
 
       {!folder && <StreakReminder open={todayCount} />}
 
-      {isEmpty && (
+      {isEmpty && folder && (
         <div className="rounded-box border-2 border-dashed border-base-300 p-10 text-center">
           <p className="text-4xl" aria-hidden>
-            {folder ? "🗂️" : "👋"}
+            🗂️
           </p>
-          <p className="mt-3 text-lg font-bold">
-            {folder ? "Hier ist noch nichts." : "Willkommen! Lege deinen ersten Ordner an."}
-          </p>
+          <p className="mt-3 text-lg font-bold">Hier ist noch nichts.</p>
           <p className="mt-1 opacity-70">
-            {folder
-              ? "Lege eine Karte an, importiere eine Tabelle, lass dir aus deinen Unterlagen Karten vorschlagen oder sortiere mit Unterordnern."
-              : "Ordner können beliebig viele Unterordner und Karteikarten enthalten."}
+            Lege eine Karte an, importiere eine Tabelle, lass dir aus deinen Unterlagen Karten vorschlagen oder sortiere mit
+            Unterordnern.
           </p>
         </div>
       )}
+
+      {isEmpty && !folder && <Welcome onCreateFolder={() => setDialog("folder")} />}
 
       {subfolders.length > 0 && (
         <section aria-labelledby="folders-heading">
@@ -345,11 +396,41 @@ export function FolderView({ folderId }: { folderId: string | null }) {
             <h2 id="cards-heading" className={SECTION_HEADING}>
               Karten
             </h2>
-            <button className="btn btn-ghost btn-xs" onClick={() => setShowSolutions((v) => !v)}>
-              {showSolutions ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-              {showSolutions ? "Lösungen verbergen" : "Lösungen zeigen"}
-            </button>
+            <div className="flex items-center gap-1">
+              <button className="btn btn-ghost btn-xs" onClick={() => setShowSolutions((v) => !v)}>
+                {showSolutions ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                {showSolutions ? "Lösungen verbergen" : "Lösungen zeigen"}
+              </button>
+              <button
+                className={`btn btn-xs ${selected ? "btn-primary" : "btn-ghost"}`}
+                aria-pressed={selected !== null}
+                onClick={() => setSelected(selected ? null : new Set())}
+              >
+                <CheckSquare className="size-3.5" />
+                {selected ? "Fertig" : "Auswählen"}
+              </button>
+            </div>
           </div>
+          {selected && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-box border-2 border-base-300 bg-base-100 px-3 py-2">
+              <span className="mr-auto text-sm font-bold tabular-nums">{pluralize(chosen.length, "Karte", "Karten")} ausgewählt</span>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setSelected(new Set(chosen.length === visible.length ? [] : visible.map((c) => c.id)))}
+              >
+                {chosen.length === visible.length ? "Keine" : "Alle"}
+              </button>
+              <button className="btn btn-sm bg-base-200" onClick={() => openCardsDialog("moveCards")} disabled={chosen.length === 0}>
+                <FolderInput className="size-4" /> Verschieben
+              </button>
+              <button className="btn btn-sm bg-base-200" onClick={() => openCardsDialog("tagCards")} disabled={chosen.length === 0}>
+                <TagIcon className="size-4" /> Tag
+              </button>
+              <button className="btn btn-sm text-error bg-base-200" onClick={() => openCardsDialog("deleteCards")} disabled={chosen.length === 0}>
+                <Trash2 className="size-4" /> Löschen
+              </button>
+            </div>
+          )}
           {(tags.length > 0 || tag) && (
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <TagFilter tags={tags} active={tag} onChange={setTag} />
@@ -367,7 +448,13 @@ export function FolderView({ folderId }: { folderId: string | null }) {
           <ul className="flex flex-col gap-3">
             {visible.slice(0, shown).map((card) => (
               <li key={card.id}>
-                <CardRow card={card} last={latest.get(card.id)} showSolution={showSolutions} />
+                <CardRow
+                  card={card}
+                  last={latest.get(card.id)}
+                  showSolution={showSolutions}
+                  selected={selected?.has(card.id)}
+                  onToggle={selected ? () => toggle(card.id) : undefined}
+                />
               </li>
             ))}
           </ul>
@@ -405,6 +492,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
                   await imageUrl(id);
                   return (await db.images.get(id)) ?? null;
                 },
+                occlude: renderOcclusion,
               });
               downloadFile(fileName(name, "apkg"), pkg, "application/apkg");
             } else {
@@ -443,6 +531,15 @@ export function FolderView({ folderId }: { folderId: string | null }) {
 
           <Modal open={dialog === "generate"} onClose={closeDialog} title={`Karten aus Unterlagen für „${folder.name}“`} full>
             <GenerateForm
+              onClose={closeDialog}
+              onSubmit={async (rows) => {
+                await createCards(folder.id, rows);
+              }}
+            />
+          </Modal>
+
+          <Modal open={dialog === "cloze"} onClose={closeDialog} title={`Lückentext für „${folder.name}“`} full>
+            <ClozeForm
               onClose={closeDialog}
               onSubmit={async (rows) => {
                 await createCards(folder.id, rows);
@@ -501,7 +598,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
           <Modal open={dialog === "delete"} onClose={closeDialog} title="Ordner löschen?">
             <p>
               „{folder.name}“ wird mit allen Unterordnern, {pluralize(scope.length, "Karte", "Karten")} und dem
-              zugehörigen Lernverlauf gelöscht. Das lässt sich nicht rückgängig machen.
+              zugehörigen Lernverlauf gelöscht. Du kannst das gleich danach noch rückgängig machen.
             </p>
             <div className="modal-action">
               <button className="btn btn-ghost" onClick={closeDialog}>
@@ -511,11 +608,59 @@ export function FolderView({ folderId }: { folderId: string | null }) {
                 className="btn btn-error btn-chunky"
                 onClick={async () => {
                   const parent = folder.parentId;
-                  await deleteFolderRecursive(folder.id);
+                  const deleted = await deleteFolderRecursive(folder.id);
                   router.replace(parent ? `/f/${parent}` : "/");
+                  showToast(`Ordner „${folder.name}“ gelöscht.`, { label: "Rückgängig", run: () => restoreDeleted(deleted) });
                 }}
               >
-                Endgültig löschen
+                Löschen
+              </button>
+            </div>
+          </Modal>
+
+          <Modal open={dialog === "moveCards"} onClose={closeDialog} title={`${pluralize(chosenCount, "Karte", "Karten")} verschieben`}>
+            <MoveCardsForm
+              folders={folders}
+              current={folder.id}
+              onCancel={closeDialog}
+              onSubmit={async (target) => {
+                await moveCards(chosen.map((c) => c.id), target);
+                closeDialog();
+                setSelected(null);
+                showToast(`${pluralize(chosen.length, "Karte", "Karten")} verschoben.`);
+              }}
+            />
+          </Modal>
+
+          <Modal open={dialog === "tagCards"} onClose={closeDialog} title={`${pluralize(chosenCount, "Karte", "Karten")} taggen`}>
+            <TagCardsForm
+              known={tagCounts(allCards).map((entry) => entry.tag)}
+              onCancel={closeDialog}
+              onSubmit={async (value) => {
+                await addTagToCards(chosen.map((c) => c.id), value);
+                closeDialog();
+                setSelected(null);
+              }}
+            />
+          </Modal>
+
+          <Modal open={dialog === "deleteCards"} onClose={closeDialog} title={`${pluralize(chosenCount, "Karte", "Karten")} löschen?`}>
+            <p>Die Karten und ihr Lernverlauf werden gelöscht. Du kannst das gleich danach noch rückgängig machen.</p>
+            <div className="modal-action">
+              <button className="btn btn-ghost" onClick={closeDialog}>
+                Abbrechen
+              </button>
+              <button
+                className="btn btn-error btn-chunky"
+                onClick={async () => {
+                  const count = chosen.length;
+                  const deleted = await deleteCards(chosen.map((c) => c.id));
+                  closeDialog();
+                  setSelected(null);
+                  showToast(`${pluralize(count, "Karte", "Karten")} gelöscht.`, { label: "Rückgängig", run: () => restoreDeleted(deleted) });
+                }}
+              >
+                Löschen
               </button>
             </div>
           </Modal>
@@ -576,6 +721,58 @@ function ExportChoice({
           Abbrechen
         </button>
       </div>
+    </div>
+  );
+}
+
+const STEPS = [
+  { icon: Plus, title: "Karten anlegen", text: "Selbst schreiben, aus Excel oder Anki importieren oder aus deinen Unterlagen von der KI vorschlagen lassen." },
+  { icon: Mic, title: "Antwort sprechen", text: "Beim Lernen sagst oder tippst du die Antwort in eigenen Worten, auch mit Handschrift." },
+  { icon: ListChecks, title: "Lücken sehen", text: "Die KI gleicht mit deiner Lösung ab: Grün hast du genannt, Grau fehlt, Rot ist unsicher." },
+];
+
+/** Empty library: what the app does in three steps, and a sample folder to try it with. */
+function Welcome({ onCreateFolder }: { onCreateFolder: () => void }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="tile flex flex-col gap-5 p-6 sm:p-8">
+      <div>
+        <p className="text-4xl" aria-hidden>
+          👋
+        </p>
+        <h2 className="mt-2 text-xl font-black">Willkommen bei Kiku</h2>
+        <p className="mt-1 opacity-70">Karteikarten, bei denen du die Antwort in eigenen Worten gibst und die KI sie mit deiner Lösung abgleicht.</p>
+      </div>
+      <ol className="grid gap-3 sm:grid-cols-3">
+        {STEPS.map((step, i) => (
+          <li key={step.title} className="rounded-box bg-base-200 p-4">
+            <step.icon className="size-6 text-primary" aria-hidden />
+            <p className="mt-2 font-extrabold">
+              {i + 1}. {step.title}
+            </p>
+            <p className="mt-1 text-sm opacity-70">{step.text}</p>
+          </li>
+        ))}
+      </ol>
+      <div className="flex flex-wrap gap-2.5">
+        <button
+          className="btn btn-primary btn-chunky"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            const folder = await createSampleFolder();
+            router.push(`/f/${folder.id}/learn`);
+          }}
+        >
+          {busy ? <span className="loading loading-spinner loading-sm" /> : <Play className="size-4" fill="currentColor" />}
+          Mit Beispielkarten ausprobieren
+        </button>
+        <button className="btn btn-chunky bg-base-100" onClick={onCreateFolder}>
+          <FolderPlus className="size-4" /> Eigenen Ordner anlegen
+        </button>
+      </div>
+      <p className="text-sm opacity-60">Der Beispielordner hat sechs Karten aus verschiedenen Fächern. Du kannst ihn jederzeit löschen.</p>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { StudySession } from "@/components/StudySession";
 import { useAllCards, useFolders, useSchedules } from "@/lib/hooks";
+import { useNewPerDay } from "@/lib/settings";
 import { planToday } from "@/lib/srs";
 import { descendantIds } from "@/lib/tree";
 import type { Card } from "@/lib/types";
@@ -19,6 +20,7 @@ function Session({ tag, folderId }: { tag: string | null; folderId: string | nul
   const folders = useFolders();
   const allCards = useAllCards();
   const schedules = useSchedules();
+  const newPerDay = useNewPerDay();
   const [now] = useState(() => Date.now());
   // Fixed on first render: results coming in must not change the running session.
   const [cards, setCards] = useState<Card[] | null>(null);
@@ -34,7 +36,7 @@ function Session({ tag, folderId }: { tag: string | null; folderId: string | nul
           .sort((a, b) => a.createdAt - b.createdAt),
       );
     } else {
-      const today = planToday(allCards, schedules, folders, now);
+      const today = planToday(allCards, schedules, folders, now, newPerDay);
       setCards([...today.due, ...today.fresh]);
     }
     return SKELETON;
