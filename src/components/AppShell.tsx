@@ -3,9 +3,14 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CloudAlert, CloudCheck, House, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { ChartNoAxesColumn, CloudAlert, CloudCheck, Flame, House, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
 import { AccountProvider, useAccount, useSyncState } from "@/components/Account";
-import { useFolders } from "@/lib/hooks";
+import { useAttemptLog, useFolders } from "@/lib/hooks";
+import { db } from "@/lib/db";
+import { cleanupImages } from "@/lib/images";
+import { enableOffline } from "@/lib/offline";
+import { streakOf } from "@/lib/stats";
 import { childrenOf } from "@/lib/tree";
 import type { Folder } from "@/lib/types";
 import { KikuMark } from "@/components/KikuMark";
@@ -37,6 +42,28 @@ function TreeNode({
         </ul>
       )}
     </li>
+  );
+}
+
+/** The running streak next to the statistics link; pale until something was answered today. */
+function StreakBadge() {
+  const log = useAttemptLog();
+  const [now] = useState(() => Date.now());
+  if (!log) return null;
+  const streak = streakOf(log.map((a) => a.createdAt), now);
+  if (streak.current === 0) return null;
+  return (
+    <span
+      className={`badge badge-sm ml-auto gap-1 border-0 font-extrabold tabular-nums ${streak.today ? "bg-warning/40" : "bg-base-200 opacity-70"}`}
+      title={
+        streak.today
+          ? `${streak.current} Tage in Folge gelernt`
+          : `${streak.current} Tage in Folge. Heute noch nichts gelernt: der Streak endet um Mitternacht.`
+      }
+    >
+      <Flame className="size-3.5" aria-hidden />
+      {streak.current}
+    </span>
   );
 }
 
@@ -99,6 +126,8 @@ function Shell({ children }: { children: ReactNode }) {
     pathname === "/datenschutz" ||
     pathname === "/agb" ||
     pathname === "/home" ||
+    // A shared deck can be read without an account; with one, it opens inside the app.
+    (pathname.startsWith("/s/") && !signedIn) ||
     (pathname === "/" && account.mode === "server" && !signedIn);
 
   // With accounts enabled the library is only available after signing in.
@@ -108,8 +137,21 @@ function Shell({ children }: { children: ReactNode }) {
     if ((signedIn || account.mode === "local") && onAuthPage) router.replace("/");
   }, [signedOut, signedIn, account.mode, onAuthPage, onPublicPage, router]);
 
+  // Without an account no sync runs, which is what tidies up pictures otherwise.
+  useEffect(() => {
+    if (account.mode === "local") void cleanupImages(false);
+  }, [account.mode]);
+
   const folders = useFolders() ?? [];
   const [open, setOpen] = useState(false);
+
+  // Stores the pages of the app for use without a network, once the library is there to pick examples from.
+  const inApp = account.mode === "local" || signedIn;
+  const anyFolder = folders[0]?.id;
+  const anyCard = useLiveQuery(async () => (await db.cards.limit(1).first())?.id ?? null, []);
+  useEffect(() => {
+    if (inApp && anyCard !== undefined) void enableOffline(anyFolder, anyCard ?? undefined);
+  }, [inApp, anyFolder, anyCard]);
   const close = () => setOpen(false);
   const showBanner = account.mode === "server" && account.user?.plan === "free";
 
@@ -174,6 +216,13 @@ function Shell({ children }: { children: ReactNode }) {
               <Link href="/search" onClick={close} className={pathname === "/search" ? "menu-active" : ""}>
                 <Search className="size-5" />
                 Suche
+              </Link>
+            </li>
+            <li>
+              <Link href="/stats" onClick={close} className={pathname === "/stats" ? "menu-active" : ""}>
+                <ChartNoAxesColumn className="size-5" />
+                Statistik
+                <StreakBadge />
               </Link>
             </li>
             {childrenOf(folders, null).map((folder) => (

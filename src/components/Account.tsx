@@ -31,6 +31,25 @@ export function useSyncState() {
   return useSyncExternalStore(syncStore.subscribe, syncStore.get, syncStore.get);
 }
 
+const USER_KEY = "kiku-user";
+
+function rememberUser(user: AccountUser | null) {
+  try {
+    if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+    else localStorage.removeItem(USER_KEY);
+  } catch {
+    // Without storage the app simply needs the network to know who is signed in.
+  }
+}
+
+function rememberedUser(): AccountUser | null {
+  try {
+    return JSON.parse(localStorage.getItem(USER_KEY) ?? "null") as AccountUser | null;
+  } catch {
+    return null;
+  }
+}
+
 export function AccountProvider({ serverMode, children }: { serverMode: boolean; children: ReactNode }) {
   const [user, setUser] = useState<AccountUser | null | undefined>(undefined);
 
@@ -45,8 +64,13 @@ export function AccountProvider({ serverMode, children }: { serverMode: boolean;
     if (!serverMode) return;
     let active = true;
     void fetch("/api/me")
-      .then(async (response) => (response.ok ? ((await response.json()).user as AccountUser | null) : null))
-      .catch(() => null)
+      .then(async (response) => {
+        const found = response.ok ? ((await response.json()).user as AccountUser | null) : null;
+        rememberUser(found);
+        return found;
+      })
+      // No network: whoever was signed in on this device last keeps working on the local copy.
+      .catch(() => rememberedUser())
       .then((found) => {
         if (active) setUser(found);
       });
@@ -82,6 +106,7 @@ export function AccountProvider({ serverMode, children }: { serverMode: boolean;
       return;
     }
     await authClient.signOut();
+    rememberUser(null);
     // The library stays in the account; this device keeps no copy for the next person.
     await wipeLocal();
     // The shell sends signed-out visitors to the sign-in page.

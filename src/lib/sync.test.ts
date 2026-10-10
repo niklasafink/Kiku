@@ -16,9 +16,12 @@ import {
   deleteFolderRecursive,
   exportAll,
   importAll,
+  setCardTags,
   setExamDate,
+  toggleCardTag,
   updateCard,
 } from "./repo";
+import { cleanupImages } from "./images";
 import { bindToUser, pendingChanges, runSync, wipeLocal } from "./sync";
 import { syncRequest } from "./syncProtocol";
 
@@ -109,6 +112,44 @@ describe("device sync", () => {
     expect(restored!.uploaded).toBe(0);
     // A backup from before pictures existed still loads.
     await importAll({ version: 1, folders: [], cards: [], attempts: [] });
+  });
+
+  it("removes old pictures no card uses, at most once a day", async () => {
+    const DAY = 86_400_000;
+    const now = 100 * DAY;
+    const data = new Uint8Array([1]).buffer;
+    const folder = await createFolder("Bio", "🧬", null);
+    await createCard(folder.id, "Aufbau?", "Siehe ![](kiku-img:used-0001)");
+    await db.images.bulkAdd([
+      { id: "used-0001", type: "image/webp", data, createdAt: now - 30 * DAY, uploaded: 1 },
+      { id: "orphan-0001", type: "image/webp", data, createdAt: now - 30 * DAY, uploaded: 1 },
+      { id: "recent-0001", type: "image/webp", data, createdAt: now - DAY, uploaded: 0 },
+    ]);
+
+    expect(await cleanupImages(false, now)).toBe(1);
+    expect((await db.images.toCollection().primaryKeys()).sort()).toEqual(["recent-0001", "used-0001"]);
+
+    // A second run on the same day does not look again.
+    await db.images.add({ id: "orphan-0002", type: "image/webp", data, createdAt: now - 30 * DAY, uploaded: 1 });
+    expect(await cleanupImages(false, now + 1000)).toBe(0);
+    expect(await cleanupImages(false, now + DAY + 1)).toBe(1);
+  });
+
+  it("syncs tags and the star, tidied up", async () => {
+    const folder = await createFolder("Bio", "🧬", null);
+    const card = await createCard(folder.id, "q", "s");
+    await setCardTags(card.id, ["#Klausur", " klausur ", "", "Kapitel  3"]);
+    await toggleCardTag(card.id, "★");
+    expect((await db.cards.get(card.id))?.tags).toEqual(["Klausur", "Kapitel 3", "★"]);
+
+    await runSync(as("u1"));
+    await freshDevice();
+    expect((await db.cards.get(card.id))?.tags).toEqual(["Klausur", "Kapitel 3", "★"]);
+
+    await toggleCardTag(card.id, "★");
+    await runSync(as("u1"));
+    await freshDevice();
+    expect((await db.cards.get(card.id))?.tags).toEqual(["Klausur", "Kapitel 3"]);
   });
 
   it("does nothing when there is nothing to do", async () => {

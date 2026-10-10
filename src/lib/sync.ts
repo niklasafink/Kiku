@@ -1,7 +1,7 @@
 // Browser half of the sync. The app keeps working on IndexedDB; this module sends local
 // changes to the server and applies what other devices (or the MCP server) changed.
 import { db, type Tombstone } from "./db";
-import { uploadPendingImages } from "./images";
+import { cleanupImages, uploadPendingImages } from "./images";
 import {
   SYNC_PAGE,
   SYNC_TABLES,
@@ -16,7 +16,7 @@ type Exchange = (request: { cursor: number; changes: ChangeSet }) => Promise<Syn
 
 const FIELDS: Record<SyncTable, string[]> = {
   folders: ["id", "parentId", "name", "emoji", "examDate", "createdAt", "updatedAt"],
-  cards: ["id", "folderId", "question", "solution", "createdAt", "updatedAt"],
+  cards: ["id", "folderId", "question", "solution", "tags", "createdAt", "updatedAt"],
   attempts: [
     "id",
     "cardId",
@@ -207,6 +207,7 @@ export function syncNow(): Promise<void> {
         await runSync(postSync);
         await uploadPendingImages();
       } while (again);
+      await cleanupImages(true);
       setState({ status: "idle", lastSyncedAt: Date.now(), error: null });
     } catch (error) {
       setState({ status: "error", error: error instanceof Error ? error.message : "Sync fehlgeschlagen" });

@@ -46,6 +46,7 @@ export async function applyChanges(db: Database, userId: string, changes: Change
           folderId: sql`excluded.folder_id`,
           question: sql`excluded.question`,
           solution: sql`excluded.solution`,
+          tags: sql`excluded.tags`,
         },
         setWhere: ifNewer(cards, userId),
       });
@@ -159,11 +160,12 @@ export async function changesSince(db: Database, userId: string, cursor: number)
         createdAt,
         updatedAt,
       })),
-      cards: live(cardRows, "cards").map(({ id, folderId, question, solution, createdAt, updatedAt }) => ({
+      cards: live(cardRows, "cards").map(({ id, folderId, question, solution, tags, createdAt, updatedAt }) => ({
         id,
         folderId,
         question,
         solution,
+        tags,
         createdAt,
         updatedAt,
       })),

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { RichEditor } from "@/components/RichEditor";
 import { toPlainText } from "@/lib/richText";
+import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
 import { descendantIds, folderOptions } from "@/lib/tree";
 import type { Folder } from "@/lib/types";
 
@@ -156,8 +157,9 @@ export function CardForm({
   const [solution, setSolution] = useState(draft?.solution ?? "");
   const [restored, setRestored] = useState(draft !== null);
   const [saved, setSaved] = useState<{ question: string; solution: string }[]>([]);
-  const questionRef = useRef<HTMLTextAreaElement>(null);
-  const valid = Boolean(question.trim() && solution.trim());
+  // Raised to put the cursor back into the question after a card was saved.
+  const [focusQuestion, setFocusQuestion] = useState(0);
+  const valid = Boolean(question.trim() && solution.trim()) && question.length <= MAX_CARD_TEXT && solution.length <= MAX_CARD_TEXT;
 
   useEffect(() => writeDraft(draftKey, question, solution), [draftKey, question, solution]);
 
@@ -169,7 +171,7 @@ export function CardForm({
       // Clear right away so text typed while the save is running is not wiped afterwards.
       setQuestion("");
       setSolution("");
-      questionRef.current?.focus();
+      setFocusQuestion((n) => n + 1);
     }
     await onSubmit(value);
     if (!keepOpen) {
@@ -203,7 +205,7 @@ export function CardForm({
             value={question}
             onChange={setQuestion}
             placeholder="Was soll abgefragt werden?"
-            inputRef={questionRef}
+            focusKey={focusQuestion}
             fill
             autoFocus
           />
@@ -245,7 +247,7 @@ export function CardForm({
                   setQuestion("");
                   setSolution("");
                   setRestored(false);
-                  questionRef.current?.focus();
+                  setFocusQuestion((n) => n + 1);
                 }}
               >
                 Verwerfen

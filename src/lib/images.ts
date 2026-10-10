@@ -2,6 +2,7 @@
 // account, uploaded once so other devices can fetch them when a card shows them.
 import { db } from "./db";
 import { newId } from "./repo";
+import { imageIds } from "./richText";
 
 /** Longest edge after scaling; enough to read a slide or a diagram. */
 const MAX_EDGE = 1600;
@@ -51,6 +52,15 @@ export async function saveImage(file: Blob): Promise<string> {
   return id;
 }
 
+/** Stores a picture as it is (already scaled, e.g. copied from a shared deck) and returns its new id. */
+export async function storeImage(blob: Blob): Promise<string> {
+  if (blob.size > MAX_IMAGE_BYTES) return saveImage(blob);
+  const id = newId();
+  await db.images.add({ id, type: blob.type, data: await blob.arrayBuffer(), createdAt: Date.now(), uploaded: 0 });
+  db.onLocalChange();
+  return id;
+}
+
 const urls = new Map<string, Promise<string | null>>();
 
 async function load(id: string): Promise<string | null> {
@@ -93,4 +103,46 @@ export async function uploadPendingImages(): Promise<void> {
     if (response.ok || response.status === 409) await db.images.update(image.id, { uploaded: 1 });
     else if (response.status !== 413) throw new Error(`Bild-Upload fehlgeschlagen (${response.status})`);
   }
+}
+
+/** A picture no card uses is removed once it is this old. Covers cards that are still being written or synced. */
+export const UNUSED_IMAGE_DAYS = 7;
+const DAY = 86_400_000;
+
+/** Ids of pictures in text kept outside the library, i.e. drafts of unsaved cards. */
+function draftImageIds(): string[] {
+  const ids: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const value = localStorage.getItem(localStorage.key(i)!) ?? "";
+      if (value.includes("kiku-img:")) ids.push(...imageIds(value));
+    }
+  } catch {
+    // No access to localStorage: then there are no drafts either.
+  }
+  return ids;
+}
+
+/**
+ * Removes pictures that no card refers to any more, here and (with an account) on the server.
+ * Does its work at most once a day. Returns how many were removed on this device.
+ */
+export async function cleanupImages(withAccount: boolean, now = Date.now()): Promise<number> {
+  const last = (await db.meta.get("imagesCleanedAt"))?.value as number | undefined;
+  if (last && now - last < DAY) return 0;
+  await db.meta.put({ key: "imagesCleanedAt", value: now });
+
+  const used = new Set(draftImageIds());
+  await db.cards.each((card) => {
+    if (card.question.includes("kiku-img:")) for (const id of imageIds(card.question)) used.add(id);
+    if (card.solution.includes("kiku-img:")) for (const id of imageIds(card.solution)) used.add(id);
+  });
+  const old = now - UNUSED_IMAGE_DAYS * DAY;
+  const unused = await db.images.filter((image) => image.createdAt < old && !used.has(image.id)).primaryKeys();
+  await db.images.bulkDelete(unused);
+  for (const id of unused) urls.delete(id);
+
+  // The server decides for itself which pictures the account's cards still use.
+  if (withAccount) await fetch("/api/images/cleanup", { method: "POST" }).catch(() => null);
+  return unused.length;
 }

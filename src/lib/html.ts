@@ -15,6 +15,7 @@ export function decodeEntities(text: string): string {
 
 const TAG = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
 const MARKS: Record<string, string> = { b: "**", strong: "**", i: "*", em: "*", mark: "==", code: "`" };
+const LIST_MARKER = /^\s*(?:- |\d+\. )$/;
 const BLOCKS = new Set(["div", "p", "ul", "ol", "blockquote", "pre", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6"]);
 
 function attribute(attributes: string, name: string): string | null {
@@ -34,13 +35,17 @@ function mark(inner: string, marker: string): string {
 }
 
 /**
- * Turns HTML into card text. `image` is asked for the markup of each picture (by its src) and
- * may return "" to leave it out. Everything without a counterpart (colours, fonts, audio) is
+ * Turns HTML into card text. `image` is asked for the markup of each picture and may return ""
+ * to leave it out. Everything without a counterpart (colours, fonts, audio) is
  * dropped; the wording is kept.
  */
-export function htmlToMarkdown(html: string, image: (src: string) => string = () => ""): string {
+export function htmlToMarkdown(
+  html: string,
+  /** Gets the src of each picture and a reader for its other attributes. */
+  image: (src: string, attribute: (name: string) => string | null) => string = () => "",
+): string {
   let source = html.replace(/\[sound:[^\]]*\]/g, "");
-  if (!source.includes("<")) return decodeEntities(source).replace(/\r/g, "").trim();
+  if (!source.includes("<") && !source.includes("\\")) return decodeEntities(source).replace(/\r/g, "").trim();
   source = source.replace(/<(style|script)\b[\s\S]*?<\/\1\s*>/gi, "");
 
   // Output is collected in nested buffers: an inline mark, a table cell or a list item
@@ -56,7 +61,8 @@ export function htmlToMarkdown(html: string, image: (src: string) => string = ()
     const out = top();
     for (let i = out.length - 1; i >= 0; i--) {
       if (!out[i]) continue;
-      if (!out[i].endsWith("\n")) out.push("\n");
+      // Right after a list marker the item's text follows on the same line, even if it is wrapped in a paragraph.
+      if (!out[i].endsWith("\n") && !LIST_MARKER.test(out[i])) out.push("\n");
       return;
     }
   };
@@ -84,7 +90,7 @@ export function htmlToMarkdown(html: string, image: (src: string) => string = ()
     if (tag === "br") emit("\n");
     else if (tag === "img") {
       const src = attribute(match[3], "src");
-      if (!closing && src) emit(image(src));
+      if (!closing && src) emit(image(src, (name) => attribute(match[3], name)));
     } else if (tag in MARKS) {
       if (!closing) stack.push({ tag, out: [] });
       else {
@@ -121,13 +127,14 @@ export function htmlToMarkdown(html: string, image: (src: string) => string = ()
       }
     } else if (BLOCKS.has(tag)) {
       if (tag === "ul" || tag === "ol") {
-        if (!closing) lists.push({ ordered: tag === "ol", count: 0 });
+        if (!closing) lists.push({ ordered: tag === "ol", count: (Number(attribute(match[3], "start")) || 1) - 1 });
         else lists.pop();
       }
       if (tag === "pre") pre = Math.max(0, pre + (closing ? -1 : 1));
       lineBreak();
-      if (!closing && /^h[1-6]$/.test(tag)) emit("## ");
-      if (closing && (tag === "p" || /^h[1-6]$/.test(tag))) emit("\n");
+      if (!closing && /^h[1-6]$/.test(tag)) emit(tag === "h1" || tag === "h2" ? "## " : "### ");
+      // A blank line after a paragraph, except inside a list, where items follow each other directly.
+      if (closing && (tag === "p" || /^h[1-6]$/.test(tag)) && lists.length === 0) emit("\n");
     }
   }
   text(source.slice(cursor));
@@ -135,6 +142,9 @@ export function htmlToMarkdown(html: string, image: (src: string) => string = ()
   return stack
     .map((entry) => entry.out.join(""))
     .join("")
+    // MathJax notation, as Anki stores formulas.
+    .replace(/\\\(\s*([^\n]+?)\s*\\\)/g, "$$$1$$")
+    .replace(/\\\[\s*([\s\S]+?)\s*\\\]/g, (_whole, tex: string) => "$$" + tex.replace(/\s*\n\s*/g, " ") + "$$")
     .replace(/\r/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n[ \t]+(?![-\d ])/g, "\n")
@@ -158,6 +168,9 @@ function inlineHtml(inlines: Inline[]): string {
           return `<mark>${inlineHtml(inline.children)}</mark>`;
         case "code":
           return `<code>${escapeHtml(inline.text)}</code>`;
+        case "math":
+          // MathJax notation, which Anki typesets.
+          return inline.display ? `\\[${escapeHtml(inline.tex)}\\]` : `\\(${escapeHtml(inline.tex)}\\)`;
         case "image":
           // Pictures live inside Kiku; another app has no file for them.
           return "";
@@ -179,6 +192,8 @@ export function markdownToHtml(text: string): string {
           const tag = block.ordered ? "ol" : "ul";
           return `<${tag}>${block.items.map((item) => `<li>${inlineHtml(item.inlines)}</li>`).join("")}</${tag}>`;
         }
+        case "math":
+          return `\\[${escapeHtml(block.tex)}\\]`;
         case "table": {
           const row = (cells: Inline[][], cell: string) => `<tr>${cells.map((c) => `<${cell}>${inlineHtml(c)}</${cell}>`).join("")}</tr>`;
           return `<table>${row(block.header, "th")}${block.rows.map((r) => row(r, "td")).join("")}</table>`;

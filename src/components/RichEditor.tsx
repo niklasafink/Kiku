@@ -1,7 +1,17 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type RefObject } from "react";
-import { Bold, Eye, Heading, Highlighter, ImagePlus, Italic, List, ListOrdered, Pencil, Table } from "lucide-react";
+import dynamic from "next/dynamic";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type DragEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import { Bold, Code, Eye, Heading, Highlighter, ImagePlus, Italic, List, ListOrdered, Pencil, Sigma, Table } from "lucide-react";
 import { CardImage, RichText } from "@/components/RichText";
 import { ImageError, saveImage } from "@/lib/images";
 import { parseTable } from "@/lib/importCards";
@@ -10,20 +20,7 @@ import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
 
 const EMPTY_TABLE = "| Spalte 1 | Spalte 2 |\n| --- | --- |\n|  |  |";
 
-/**
- * Text field for one side of a card. It grows with its content and adds formatting, lists,
- * tables and pictures through the toolbar, shortcuts, paste and drag and drop.
- */
-export function RichEditor({
-  label,
-  value,
-  onChange,
-  placeholder,
-  autoFocus,
-  minHeight = "11rem",
-  fill,
-  inputRef,
-}: {
+export interface EditorProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -33,10 +30,74 @@ export function RichEditor({
   minHeight?: string;
   /** Takes the height its (flex) container offers and scrolls inside, instead of growing. */
   fill?: boolean;
-  inputRef?: RefObject<HTMLTextAreaElement | null>;
-}) {
-  const ownRef = useRef<HTMLTextAreaElement>(null);
-  const ref = inputRef ?? ownRef;
+  /** Puts the cursor into the field whenever this changes. */
+  focusKey?: number;
+}
+
+// The visual editor brings a whole editing library; it is loaded when an editor is first shown.
+const VisualEditor = dynamic(() => import("@/components/VisualEditor"), {
+  ssr: false,
+  loading: () => <div className="skeleton min-h-44 w-full flex-1 rounded-field" />,
+});
+
+const MODE_KEY = "kiku-editor";
+
+function storedSource(): boolean {
+  try {
+    return localStorage.getItem(MODE_KEY) === "source";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Field for one side of a card. Normally it shows the text the way the card will look; the
+ * source view shows the same text with its markup, for those who prefer to type it.
+ */
+export function RichEditor(props: EditorProps) {
+  const [source, setSource] = useState(storedSource);
+  const modeSwitch = (
+    <button
+      type="button"
+      className="btn btn-ghost btn-sm btn-square"
+      onClick={() => {
+        const next = !source;
+        setSource(next);
+        try {
+          localStorage.setItem(MODE_KEY, next ? "source" : "visual");
+        } catch {
+          // Not remembered, that is all.
+        }
+      }}
+      aria-pressed={source}
+      aria-label="Quelltext"
+      title={source ? "Zur formatierten Ansicht" : "Quelltext mit Markierungen wie **fett** anzeigen"}
+    >
+      <Code className="size-4" />
+    </button>
+  );
+  return source ? <SourceEditor {...props} modeSwitch={modeSwitch} /> : <VisualEditor {...props} modeSwitch={modeSwitch} />;
+}
+
+/**
+ * The source view: a text field that grows with its content and adds the markup for formatting,
+ * lists, tables and pictures through the toolbar, shortcuts, paste and drag and drop.
+ */
+function SourceEditor({
+  label,
+  value,
+  onChange,
+  placeholder,
+  autoFocus,
+  minHeight = "11rem",
+  fill,
+  focusKey = 0,
+  modeSwitch,
+}: EditorProps & { modeSwitch?: ReactNode }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusKey) ref.current?.focus();
+  }, [focusKey]);
   const fileInput = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -160,7 +221,7 @@ export function RichEditor({
     <div className={`flex min-w-0 flex-col gap-1.5 ${fill ? "min-h-0 flex-1" : ""}`}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="mr-auto text-sm font-bold">{label}</span>
-        <div className={`flex flex-wrap items-center ${preview ? "invisible" : ""}`} role="toolbar" aria-label={`Formatierung: ${label}`}>
+        <div className={`flex flex-wrap items-center ${preview ? "hidden" : ""}`} role="toolbar" aria-label={`Formatierung: ${label}`}>
           <button type="button" className={tool} onClick={() => wrap("**")} title="Fett (⌘/Strg + B)" aria-label="Fett">
             <Bold className="size-4" />
           </button>
@@ -169,6 +230,15 @@ export function RichEditor({
           </button>
           <button type="button" className={tool} onClick={() => wrap("==")} title="Markieren" aria-label="Markieren">
             <Highlighter className="size-4" />
+          </button>
+          <button
+            type="button"
+            className={tool}
+            onClick={() => wrap("$")}
+            title="Formel (LaTeX), z. B. $E = mc^2$. Eigene Zeile: $$ … $$"
+            aria-label="Formel"
+          >
+            <Sigma className="size-4" />
           </button>
           <button
             type="button"
@@ -221,6 +291,7 @@ export function RichEditor({
           {preview ? <Pencil className="size-4" /> : <Eye className="size-4" />}
           {preview ? "Bearbeiten" : "Vorschau"}
         </button>
+        {modeSwitch}
         <input
           ref={fileInput}
           type="file"

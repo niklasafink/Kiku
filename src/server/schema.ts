@@ -1,5 +1,5 @@
 import { bigint, index, integer, jsonb, pgSequence, pgTable, text } from "drizzle-orm/pg-core";
-import type { Segment } from "@/lib/types";
+import type { InputMode, Segment } from "@/lib/types";
 
 /** Every write takes the next value. Clients pull "everything with a higher rev than last time". */
 export const syncRev = pgSequence("sync_rev");
@@ -36,6 +36,7 @@ export const cards = pgTable(
     folderId: text("folder_id").notNull(),
     question: text("question").notNull(),
     solution: text("solution").notNull(),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
   },
   (t) => [index("cards_user_rev").on(t.userId, t.rev)],
 );
@@ -45,7 +46,7 @@ export const attempts = pgTable(
   {
     ...synced(),
     cardId: text("card_id").notNull(),
-    inputMode: text("input_mode").$type<"voice" | "text">().notNull(),
+    inputMode: text("input_mode").$type<InputMode>().notNull(),
     answerText: text("answer_text").notNull(),
     solutionSnapshot: text("solution_snapshot").notNull(),
     segments: jsonb("segments").$type<Segment[]>().notNull(),
@@ -67,6 +68,18 @@ export const images = pgTable(
     createdAt: ms("created_at").notNull(),
   },
   (t) => [index("images_user").on(t.userId)],
+);
+
+/** A folder made readable for anyone who has the link. The id is the secret in that link. */
+export const shares = pgTable(
+  "shares",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    folderId: text("folder_id").notNull(),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [index("shares_user_folder").on(t.userId, t.folderId)],
 );
 
 /** Personal access tokens for the MCP endpoint. Only a hash is stored. */

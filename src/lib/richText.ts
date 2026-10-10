@@ -1,5 +1,5 @@
 // Cards are stored as plain text with a small Markdown subset: **bold**, *italic*, ==marked==,
-// `code`, headings, lists, tables and pictures. Plain text stays what it is, so import, export,
+// `code`, $formulas$, headings, lists, tables and pictures. Plain text stays what it is, so import, export,
 // search, MCP and grading keep working on the same string.
 
 export const IMAGE_SCHEME = "kiku-img:";
@@ -8,19 +8,33 @@ export type Inline =
   | { type: "text"; text: string }
   | { type: "bold" | "italic" | "mark"; children: Inline[] }
   | { type: "code"; text: string }
+  /** A formula in TeX notation. */
+  | { type: "math"; tex: string; display: boolean }
   | { type: "image"; id: string; alt: string };
 
 export type Block =
   | { type: "paragraph"; inlines: Inline[] }
   | { type: "heading"; level: 1 | 2 | 3; inlines: Inline[] }
   | { type: "list"; ordered: boolean; items: { depth: number; marker: string; inlines: Inline[] }[] }
-  | { type: "table"; header: Inline[][]; rows: Inline[][][] };
+  | { type: "table"; header: Inline[][]; rows: Inline[][][] }
+  | { type: "math"; tex: string };
 
 const IMAGE = /!\[([^\]\n]*)\]\(kiku-img:([A-Za-z0-9-]+)\)/;
 const IMAGE_ALL = new RegExp(IMAGE.source, "g");
-// Order matters: code first so its content is left alone, bold before italic.
+// A formula starts and ends at a non-space, so amounts of money ("5 $ oder 10 $") are left alone.
+const MATH_DISPLAY = "\\$\\$([^$\\n]+?)\\$\\$";
+const MATH = "\\$(\\S(?:[^$\\n]*?\\S)?)\\$";
+// Order matters: code and formulas first so their content is left alone, bold before italic.
 const INLINE = new RegExp(
-  [IMAGE.source, "`([^`\\n]+)`", "\\*\\*(\\S(?:[^\\n]*?\\S)?)\\*\\*", "==(\\S(?:[^\\n]*?\\S)?)==", "\\*(\\S(?:[^*\\n]*?\\S)?)\\*"].join("|"),
+  [
+    IMAGE.source,
+    "`([^`\\n]+)`",
+    MATH_DISPLAY,
+    MATH,
+    "\\*\\*(\\S(?:[^\\n]*?\\S)?)\\*\\*",
+    "==(\\S(?:[^\\n]*?\\S)?)==",
+    "\\*(\\S(?:[^*\\n]*?\\S)?)\\*",
+  ].join("|"),
 );
 
 export function parseInline(text: string): Inline[] {
@@ -30,9 +44,11 @@ export function parseInline(text: string): Inline[] {
     const match = INLINE.exec(rest);
     if (!match) break;
     if (match.index > 0) result.push({ type: "text", text: rest.slice(0, match.index) });
-    const [whole, alt, imageId, code, bold, mark, italic] = match;
+    const [whole, alt, imageId, code, display, math, bold, mark, italic] = match;
     if (imageId !== undefined) result.push({ type: "image", id: imageId, alt });
     else if (code !== undefined) result.push({ type: "code", text: code });
+    else if (display !== undefined) result.push({ type: "math", tex: display.trim(), display: true });
+    else if (math !== undefined) result.push({ type: "math", tex: math, display: false });
     else if (bold !== undefined) result.push({ type: "bold", children: parseInline(bold) });
     else if (mark !== undefined) result.push({ type: "mark", children: parseInline(mark) });
     else result.push({ type: "italic", children: parseInline(italic) });
@@ -69,6 +85,19 @@ export function parseBlocks(text: string): Block[] {
     if (!line.trim()) {
       flush();
       continue;
+    }
+
+    // A formula on lines of its own: $$ ... $$, possibly over several lines.
+    if (line.trim().startsWith("$$")) {
+      let end = i;
+      let body = line.trim().slice(2);
+      while (!body.trimEnd().endsWith("$$") && end + 1 < lines.length) body += `\n${lines[++end]}`;
+      if (body.trimEnd().endsWith("$$") && body.trim().length > 2) {
+        flush();
+        blocks.push({ type: "math", tex: body.trimEnd().slice(0, -2).trim() });
+        i = end;
+        continue;
+      }
     }
 
     const heading = HEADING.exec(line);
@@ -114,6 +143,11 @@ export function imageIds(text: string): string[] {
   return [...text.matchAll(IMAGE_ALL)].map((match) => match[2]);
 }
 
+/** The pictures a text refers to, with their alternative text, in order. */
+export function imageRefs(text: string): { id: string; alt: string }[] {
+  return [...text.matchAll(IMAGE_ALL)].map((match) => ({ id: match[2], alt: match[1] }));
+}
+
 export function imageMarkup(id: string): string {
   return `![](${IMAGE_SCHEME}${id})`;
 }
@@ -123,7 +157,7 @@ export function imageMarkup(id: string): string {
  * out, the wording itself is untouched.
  */
 export function toPlainText(text: string): string {
-  if (!/[*`=#|!]/.test(text)) return text.trim();
+  if (!/[*`=#|!$]/.test(text)) return text.trim();
   return text
     .replace(/\r/g, "")
     .split("\n")
@@ -134,6 +168,10 @@ export function toPlainText(text: string): string {
       return out
         .replace(/^(\s*)#{1,3}\s+/, "$1")
         .replace(/`([^`\n]+)`/g, "$1")
+        // Formulas stay as their TeX source, which is what a student would write or say.
+        .replace(/\$\$([^$\n]*?)\$\$/g, "$1")
+        .replace(/^\s*\$\$\s*$/, "")
+        .replace(/\$(\S(?:[^$\n]*?\S)?)\$/g, "$1")
         .replace(/\*\*(\S(?:[^\n]*?\S)?)\*\*/g, "$1")
         .replace(/==(\S(?:[^\n]*?\S)?)==/g, "$1")
         .replace(/\*(\S(?:[^*\n]*?\S)?)\*/g, "$1");

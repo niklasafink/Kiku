@@ -20,11 +20,12 @@ it works on tablets, phones, Mac and Windows alike. On iPad you can add it to th
 ## Features
 
 - Folders with any depth of subfolders, cards with question and solution side by side; folders and cards can be moved
-- Rich cards: bold, italic, highlighting, headings, lists, tables and pictures. Pictures are pasted, dropped or picked; cells copied from a spreadsheet become a table
+- Rich cards: bold, italic, highlighting, headings, lists, tables, formulas (LaTeX) and pictures, written in an editor that shows the card as it will look. Pictures are pasted, dropped or picked
+- Image occlusion: cover spots of a diagram and name them; each spot becomes a card that asks for it
 - Import: paste a table, or drop an Excel (.xlsx), CSV, TSV or text file; choose which columns hold question and solution. Tens of thousands of rows take about a second
 - Import from Anki: packages (.apkg, .colpkg) with their decks as subfolders, pictures, formatting and cloze notes; text exports with HTML are converted too
-- Export a folder or the whole library as CSV (Excel, Numbers), as a text file for Anki that keeps the formatting, or as plain tab-separated text (Quizlet and others); all of them can be imported again
-- AI cards from your material: upload lecture slides or a script (PDF, PowerPoint, Word, text), review the proposed cards, then save them
+- Export a folder or the whole library as CSV (Excel, Numbers), as an Anki package (.apkg) with pictures, as a text file for Anki, or as plain tab-separated text (Quizlet and others); all of them can be imported again
+- AI cards from your material: upload lecture slides or a script (PDF, also scanned; PowerPoint, Word, text, photos of your notes), review the proposed cards, then save them
 - Spaced repetition: after each answer the card is scheduled for its next repetition (FSRS), with the AI's score as the rating
 - Exam dates: set the day of the exam on a folder and "Heute lernen" hands out what is due plus today's share of the new cards
 - Study a folder including all of its subfolders, only its weak cards, or a single card
@@ -33,6 +34,13 @@ it works on tablets, phones, Mac and Windows alike. On iPad you can add it to th
 - Search across all questions and solutions
 - Voice answers of any practical length: recorded in the browser, transcribed by an AI model
 - Typed answers as an alternative, and you can correct the transcript before grading
+- Handwritten answers: write with Apple Pencil, another stylus or a finger; the AI reads the writing and grades it
+- Hands-free studying: the question is read aloud, you answer, the result is announced, the next card follows
+- After grading, the AI explains on request what was missing and how to remember it
+- Tags and a star to mark cards across folders, to filter by and to study
+- Statistics: streak, answers per day, average score and the repetitions coming up
+- Share a folder by link; others can read it and copy it into their own library
+- Works without a network: browse, write cards and check yourself against the solution; grading waits for a connection
 - Per-card history with score trend and the graded solution of every attempt
 - Light and dark theme
 - JSON backup and restore
@@ -146,8 +154,9 @@ are shown in red rather than guessed.
 ## Cards: text, formatting and pictures
 
 Question and solution are stored as plain text with a small Markdown subset (`**bold**`, `*italic*`,
-`==marked==`, `` `code` ``, `#` headings, `-` and `1.` lists, tables, pictures). The editor's toolbar
-writes that markup; a card without any stays the plain text it always was. Import, export, search
+`==marked==`, `` `code` ``, `$formulas$`, `#` headings, `-` and `1.` lists, tables, pictures). The
+editor shows the formatted card and translates to and from that markup (a button switches to the
+source); a card without any markup stays the plain text it always was. Import, export, search
 and the MCP tools all work on this one string.
 
 Pictures are scaled down in the browser (longest edge 1600 px, WebP) and kept in IndexedDB. A card
@@ -170,6 +179,30 @@ current Anki versions write.
 - Pictures are stored like pasted ones. With several decks each deck becomes a subfolder.
 - Scheduling and review history stay in Anki: Kiku grades answers differently, so every
   imported card starts as new.
+
+## Handwriting, scans and other pictures the AI reads
+
+`/api/read-image` hands a picture to the transcription model and returns the text on it. It is
+used for handwritten answers (`src/components/Handwriting.tsx`, `src/lib/ink.ts`: strokes are kept
+as points, painted with the pen's pressure and sent as one cropped picture) and for pages of
+study material without a text layer (`src/lib/material.ts`). With accounts on, the number of
+pictures per day is limited (`IMAGE_LIMITS` in `src/server/quota.ts`).
+
+## Offline
+
+`/sw.js` (`src/app/sw.js/route.ts`) is a service worker that answers from the network while there
+is one and from its cache otherwise. The data is in IndexedDB anyway, so what it stores are the
+pages of the app. Pages that carry an id in their address (`/f/<id>`, `/c/<id>`) are identical
+apart from that id; for one that was never opened the worker takes the stored copy of another id
+and swaps the id. `src/lib/offline.ts` loads one page of each kind after a new version is
+installed. Every deployment has its own cache. Grading, transcription and sync need the network.
+
+## Sharing
+
+A share is a random token for a folder (`src/server/shares.ts`). `/s/<token>` shows the folder
+with its subfolders as it is at that moment, without an account. Pictures are served through the
+link only if one of the shared cards shows them. Copying creates new folders, cards and pictures
+in the reader's library; the original owner's star and learning history are not part of it.
 
 ## Spaced repetition and exam dates
 
@@ -219,6 +252,13 @@ src/lib/exportCards.ts   CSV, Anki and tab-separated export
 src/lib/richText.ts      the Markdown subset of cards; src/components/RichText.tsx renders it
 src/lib/images.ts        pictures in cards: scaling, local storage, upload
 src/lib/srs.ts           spaced repetition and the plan towards an exam
+src/lib/stats.ts         streak and the numbers of the statistics page
+src/lib/ink.ts           handwriting: strokes, painting, the picture the AI reads
+src/lib/occlusion.ts     image occlusion cards
+src/lib/editorHtml.ts    card text to and from the visual editor (src/components/VisualEditor.tsx)
+src/lib/ankiExport.ts    writing Anki packages (src/lib/sqliteWrite.ts, src/lib/zipWrite.ts)
+src/lib/offline.ts       registering the service worker and storing the pages
+src/server/shares.ts     folders shared by link
 src/server/generate.ts   AI cards from study material
 docs/design-references/  screens of other flashcard apps used as inspiration
 ```
@@ -243,11 +283,10 @@ with the OpenRouter provider, Vitest.
 ## Roadmap
 
 - OAuth for the MCP endpoint, so clients without custom headers can connect
-- Offline support
-- Export as an Anki package (.apkg), so pictures travel to Anki as well
-- Formulas (LaTeX) in cards
-- Reading scanned material (pages without a text layer)
-- Removing pictures from the account when no card uses them any more
+- English interface
+- Push notifications as a reminder to keep the streak
+- Grading answers that were given offline once the connection is back
+- Occlusion masks in the Anki export (pictures are exported uncovered)
 
 ## License
 

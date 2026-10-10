@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   FileUp,
+  Flame,
   FolderInput,
   FolderPlus,
   GraduationCap,
@@ -18,20 +19,29 @@ import {
   Pencil,
   Play,
   Plus,
+  ScanEye,
+  Share2,
   Sparkles,
   Target,
   Trash2,
 } from "lucide-react";
+import { useAccount } from "@/components/Account";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CardRow } from "@/components/CardRow";
 import { CardForm, ExamForm, FolderForm, MoveFolderForm } from "@/components/forms";
 import { GenerateForm } from "@/components/GenerateForm";
 import { ImportForm } from "@/components/ImportForm";
 import { Modal } from "@/components/Modal";
+import { OcclusionForm } from "@/components/OcclusionForm";
+import { ShareForm } from "@/components/ShareForm";
+import { tagCounts, TagFilter } from "@/components/Tags";
+import { buildAnkiPackage } from "@/lib/ankiExport";
 import { importAnkiPackage } from "@/lib/ankiImport";
+import { db } from "@/lib/db";
 import { downloadFile, exportCards, fileName, type ExportFormat } from "@/lib/exportCards";
 import { formatDate, inDays, pluralize } from "@/lib/format";
-import { useAllCards, useFolders, useLatestAttempts, useSavedSession, useSchedules } from "@/lib/hooks";
+import { imageUrl } from "@/lib/images";
+import { useAllCards, useAttemptLog, useFolders, useLatestAttempts, useSavedSession, useSchedules } from "@/lib/hooks";
 import {
   createCard,
   createCards,
@@ -42,10 +52,11 @@ import {
   updateFolder,
 } from "@/lib/repo";
 import { daysUntil, examDates, planToday } from "@/lib/srs";
+import { streakOf } from "@/lib/stats";
 import { EXAM_CARDS, isWeak } from "@/lib/study";
 import { childrenOf, descendantIds } from "@/lib/tree";
 
-type Dialog = "folder" | "card" | "import" | "generate" | "export" | "exam" | "rename" | "move" | "delete" | null;
+type Dialog = "folder" | "card" | "import" | "generate" | "export" | "exam" | "share" | "occlusion" | "rename" | "move" | "delete" | null;
 
 /** Cards rendered at first and added per click; a folder can hold thousands after an import. */
 const CARDS_PAGE = 60;
@@ -76,6 +87,7 @@ function Mastery({ done, total, className = "" }: { done: number; total: number;
 /** Library root (folderId = null) or the contents of one folder. */
 export function FolderView({ folderId }: { folderId: string | null }) {
   const router = useRouter();
+  const account = useAccount();
   const folders = useFolders();
   const allCards = useAllCards();
   const latest = useLatestAttempts();
@@ -84,6 +96,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [showSolutions, setShowSolutions] = useState(true);
   const [shown, setShown] = useState(CARDS_PAGE);
+  const [tag, setTag] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
   const closeDialog = () => setDialog(null);
 
@@ -118,6 +131,8 @@ export function FolderView({ folderId }: { folderId: string | null }) {
     ? Math.round(practised.reduce((sum, c) => sum + latest.get(c.id)!.score, 0) / practised.length)
     : null;
   const isEmpty = subfolders.length === 0 && cards.length === 0;
+  const tags = tagCounts(cards);
+  const visible = tag ? cards.filter((c) => c.tags?.includes(tag)) : cards;
   const today = planToday(scope, schedules, folders, now);
   const todayCount = today.due.length + today.fresh.length;
   // The exam this folder studies towards: its own date or one inherited from a parent.
@@ -171,10 +186,22 @@ export function FolderView({ folderId }: { folderId: string | null }) {
                   </button>
                 </li>
                 <li>
+                  <button onClick={() => setDialog("occlusion")}>
+                    <ScanEye className="size-4" /> Karten aus Bild (abdecken)
+                  </button>
+                </li>
+                <li>
                   <button onClick={() => setDialog("exam")}>
                     <CalendarClock className="size-4" /> Prüfungstermin
                   </button>
                 </li>
+                {account.mode === "server" && (
+                  <li>
+                    <button onClick={() => setDialog("share")}>
+                      <Share2 className="size-4" /> Teilen
+                    </button>
+                  </li>
+                )}
                 <li>
                   <button className="text-error" onClick={() => setDialog("delete")}>
                     <Trash2 className="size-4" /> Löschen
@@ -268,6 +295,8 @@ export function FolderView({ folderId }: { folderId: string | null }) {
         </div>
       </header>
 
+      {!folder && <StreakReminder open={todayCount} />}
+
       {isEmpty && (
         <div className="rounded-box border-2 border-dashed border-base-300 p-10 text-center">
           <p className="text-4xl" aria-hidden>
@@ -321,17 +350,31 @@ export function FolderView({ folderId }: { folderId: string | null }) {
               {showSolutions ? "Lösungen verbergen" : "Lösungen zeigen"}
             </button>
           </div>
+          {(tags.length > 0 || tag) && (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <TagFilter tags={tags} active={tag} onChange={setTag} />
+              {tag && folder && (
+                <Link
+                  href={`/learn?tag=${encodeURIComponent(tag)}&folder=${folder.id}`}
+                  className="btn btn-xs btn-primary ml-auto"
+                  title="Alle Karten mit diesem Tag in diesem Ordner und seinen Unterordnern"
+                >
+                  <Play className="size-3" fill="currentColor" /> Diese lernen
+                </Link>
+              )}
+            </div>
+          )}
           <ul className="flex flex-col gap-3">
-            {cards.slice(0, shown).map((card) => (
+            {visible.slice(0, shown).map((card) => (
               <li key={card.id}>
                 <CardRow card={card} last={latest.get(card.id)} showSolution={showSolutions} />
               </li>
             ))}
           </ul>
-          {cards.length > shown && (
+          {visible.length > shown && (
             <button className="btn btn-chunky mt-4 bg-base-100" onClick={() => setShown((n) => n + CARDS_PAGE * 4)}>
               Weitere Karten zeigen
-              <span className="badge badge-sm badge-ghost">{cards.length - shown}</span>
+              <span className="badge badge-sm badge-ghost">{visible.length - shown}</span>
             </button>
           )}
         </section>
@@ -352,10 +395,23 @@ export function FolderView({ folderId }: { folderId: string | null }) {
         <ExportChoice
           count={scope.length}
           onCancel={closeDialog}
-          onChoose={(format) => {
-            const text = exportCards(scope, folders, format);
-            if (format === "csv") downloadFile(fileName(folder?.name ?? "kiku", "csv"), text, "text/csv;charset=utf-8");
-            else downloadFile(fileName(folder?.name ?? "kiku", "txt"), text, "text/plain;charset=utf-8");
+          onChoose={async (format) => {
+            const name = folder?.name ?? "kiku";
+            if (format === "apkg") {
+              const pkg = await buildAnkiPackage(scope, folders, {
+                rootName: folder?.name ?? "Kiku",
+                image: async (id) => {
+                  // Makes sure a picture added on another device is on this one.
+                  await imageUrl(id);
+                  return (await db.images.get(id)) ?? null;
+                },
+              });
+              downloadFile(fileName(name, "apkg"), pkg, "application/apkg");
+            } else {
+              const text = exportCards(scope, folders, format);
+              if (format === "csv") downloadFile(fileName(name, "csv"), text, "text/csv;charset=utf-8");
+              else downloadFile(fileName(name, "txt"), text, "text/plain;charset=utf-8");
+            }
             closeDialog();
           }}
         />
@@ -392,6 +448,19 @@ export function FolderView({ folderId }: { folderId: string | null }) {
                 await createCards(folder.id, rows);
               }}
             />
+          </Modal>
+
+          <Modal open={dialog === "occlusion"} onClose={closeDialog} title={`Bild abdecken für „${folder.name}“`} full>
+            <OcclusionForm
+              onClose={closeDialog}
+              onSubmit={async (rows) => {
+                await createCards(folder.id, rows);
+              }}
+            />
+          </Modal>
+
+          <Modal open={dialog === "share"} onClose={closeDialog} title={`„${folder.name}“ teilen`}>
+            <ShareForm folderId={folder.id} onClose={closeDialog} />
           </Modal>
 
           <Modal open={dialog === "exam"} onClose={closeDialog} title="Prüfungstermin">
@@ -462,22 +531,38 @@ function ExportChoice({
   onCancel,
 }: {
   count: number;
-  onChoose: (format: ExportFormat) => void;
+  onChoose: (format: ExportFormat | "apkg") => void | Promise<void>;
   onCancel: () => void;
 }) {
+  const [busy, setBusy] = useState(false);
   const option = "tile flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left";
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm opacity-70">
-        {pluralize(count, "Karte", "Karten")}, einschließlich aller Unterordner. Alle drei Dateien lassen sich hier
-        auch wieder importieren.
+        {pluralize(count, "Karte", "Karten")}, einschließlich aller Unterordner. Alle Dateien lassen sich hier auch
+        wieder importieren.
       </p>
       <button className={option} onClick={() => onChoose("csv")}>
         <span className="font-extrabold">Tabelle (.csv)</span>
         <span className="text-sm opacity-70">Für Excel, Numbers und Google Tabellen. Mit einer Spalte für den Ordner.</span>
       </button>
+      <button
+        className={option}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          await onChoose("apkg");
+        }}
+      >
+        <span className="flex items-center gap-2 font-extrabold">
+          Anki-Paket (.apkg) {busy && <span className="loading loading-spinner loading-xs" />}
+        </span>
+        <span className="text-sm opacity-70">
+          Für Anki am Computer und auf dem Handy. Mit Bildern, Formatierung, Formeln und Ordnern als Stapel.
+        </span>
+      </button>
       <button className={option} onClick={() => onChoose("anki")}>
-        <span className="font-extrabold">Für Anki (.txt)</span>
+        <span className="font-extrabold">Für Anki als Text (.txt)</span>
         <span className="text-sm opacity-70">
           In Anki über „Datei → Importieren“. Fett, Listen und Tabellen bleiben erhalten, Bilder nicht.
         </span>
@@ -492,5 +577,23 @@ function ExportChoice({
         </button>
       </div>
     </div>
+  );
+}
+
+/** On the library page: a nudge while a running streak has not been continued today. */
+function StreakReminder({ open }: { open: number }) {
+  const log = useAttemptLog();
+  const [now] = useState(() => Date.now());
+  if (!log) return null;
+  const streak = streakOf(log.map((a) => a.createdAt), now);
+  if (streak.current === 0 || streak.today) return null;
+  return (
+    <p className="alert alert-warning alert-soft" role="status">
+      <Flame className="size-5 shrink-0" aria-hidden />
+      <span>
+        <span className="font-bold">{pluralize(streak.current, "Tag", "Tage")} in Folge gelernt.</span> Heute fehlt noch
+        {open > 0 ? `: ${pluralize(open, "Karte wartet", "Karten warten")} auf dich.` : " eine Antwort, damit der Streak weiterläuft."}
+      </span>
+    </p>
   );
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Image as ImageIcon } from "lucide-react";
 import { ScoreBadge } from "@/components/score";
+import { StarButton, TagList } from "@/components/Tags";
 import { imageIds, toPlainText } from "@/lib/richText";
 import type { Attempt, Card } from "@/lib/types";
 
@@ -35,10 +36,14 @@ export function CardRow({
         <span className={FACE}>
           <span className="flex items-center justify-between gap-2">
             <span className={FACE_LABEL}>Frage</span>
-            {last ? <ScoreBadge score={last.score} /> : <span className="badge badge-ghost badge-sm font-bold">Neu</span>}
+            <span className="flex items-center gap-1">
+              {last ? <ScoreBadge score={last.score} /> : <span className="badge badge-ghost badge-sm font-bold">Neu</span>}
+              <StarButton card={card} className="-my-1.5 -mr-2" />
+            </span>
           </span>
           <span className="line-clamp-4 font-bold whitespace-pre-wrap">{toPlainText(card.question)}</span>
           {imageIds(card.question).length > 0 && <Picture />}
+          <TagList card={card} />
         </span>
         <span className={FACE}>
           <span className={FACE_LABEL}>Lösung</span>

@@ -78,3 +78,33 @@ describe("toMarkdownTable", () => {
     ]);
   });
 });
+
+describe("formulas", () => {
+  it("reads inline formulas and leaves their content alone", () => {
+    expect(parseInline("Es gilt $a*b*c = \\frac{1}{2}$ und $$x^2$$ hier.")).toEqual([
+      { type: "text", text: "Es gilt " },
+      { type: "math", tex: "a*b*c = \\frac{1}{2}", display: false },
+      { type: "text", text: " und " },
+      { type: "math", tex: "x^2", display: true },
+      { type: "text", text: " hier." },
+    ]);
+  });
+
+  it("does not mistake amounts of money for formulas", () => {
+    expect(parseInline("5 $ oder 10 $ pro Stück, $5 und $10")).toEqual([{ type: "text", text: "5 $ oder 10 $ pro Stück, $5 und $10" }]);
+  });
+
+  it("reads formulas on lines of their own, also over several lines", () => {
+    expect(parseBlocks("Satz:\n$$a^2 + b^2 = c^2$$\nweiter\n\n$$\n\\sum_{i=1}^n i\n= \\frac{n(n+1)}{2}\n$$")).toEqual([
+      { type: "paragraph", inlines: [{ type: "text", text: "Satz:" }] },
+      { type: "math", tex: "a^2 + b^2 = c^2" },
+      { type: "paragraph", inlines: [{ type: "text", text: "weiter" }] },
+      { type: "math", tex: "\\sum_{i=1}^n i\n= \\frac{n(n+1)}{2}" },
+    ]);
+    expect(parseBlocks("$$ nie geschlossen")[0].type).toBe("paragraph");
+  });
+
+  it("keeps the source of a formula in the plain text", () => {
+    expect(toPlainText("Energie: $E = mc^2$\n$$\nF = ma\n$$")).toBe("Energie: E = mc^2\n\nF = ma");
+  });
+});

@@ -43,12 +43,21 @@ export function GenerateForm({
   const pages = material ? material.pages : text.trim() ? text.split(/\n\s*\n/) : [];
   const busy = status.step !== "idle";
 
-  async function loadFile(file: File) {
+  /** Several files become one piece of material, e.g. photos of the pages of a script. */
+  async function loadFiles(files: File[]) {
+    if (files.length === 0) return;
     setError(null);
     setStatus({ step: "reading", done: 0, total: 0 });
     try {
-      const read = await readMaterial(file, (done, total) => setStatus({ step: "reading", done, total }));
-      setMaterial({ name: file.name, pages: read });
+      const pages: string[] = [];
+      for (const [i, file] of files.entries()) {
+        const read = await readMaterial(file, (done, total) =>
+          setStatus(files.length > 1 ? { step: "reading", done: i + 1, total: files.length } : { step: "reading", done, total }),
+        );
+        pages.push(...read);
+        if (files.length > 1) setStatus({ step: "reading", done: i + 1, total: files.length });
+      }
+      setMaterial({ name: files.length === 1 ? files[0].name : `${files[0].name} und ${files.length - 1} weitere`, pages });
     } catch (e) {
       setError(e instanceof MaterialError ? e.message : "Die Datei konnte nicht gelesen werden.");
     } finally {
@@ -112,8 +121,7 @@ export function GenerateForm({
 
   function handleDrop(event: DragEvent) {
     event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    if (file && !busy) void loadFile(file);
+    if (!busy) void loadFiles([...event.dataTransfer.files]);
   }
 
   const patch = (id: number, change: Partial<Draft>) =>
@@ -223,7 +231,7 @@ export function GenerateForm({
     >
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
         <p className="text-sm opacity-70">
-          Lade Vorlesungsfolien, ein Skript oder deine Notizen hoch (PDF, PowerPoint, Word, Text) oder füge Text ein.
+          Lade Vorlesungsfolien, ein Skript oder deine Notizen hoch (PDF, PowerPoint, Word, Text, Fotos) oder füge Text ein.
           Die KI schlägt Karten mit Frage und ausformulierter Lösung vor; du prüfst sie, bevor etwas gespeichert wird.
         </p>
 
@@ -243,25 +251,26 @@ export function GenerateForm({
                 <>
                   <span className="loading loading-spinner" />
                   <span className="font-bold">
-                    Datei wird gelesen{status.total > 0 && ` · Seite ${status.done} von ${status.total}`}
+                    Datei wird gelesen{status.total > 0 && ` · ${status.done} von ${status.total}`}
                   </span>
                 </>
               ) : (
                 <>
                   <FileUp className="size-7 opacity-60" aria-hidden />
                   <span className="font-bold">Datei wählen oder hierher ziehen</span>
-                  <span className="text-sm opacity-70">PDF, .pptx, .docx, .txt</span>
+                  <span className="text-sm opacity-70">PDF (auch gescannt), .pptx, .docx, .txt oder Fotos deiner Mitschrift</span>
                 </>
               )}
               <input
                 type="file"
                 accept={MATERIAL_ACCEPT}
+                multiple
                 className="hidden"
                 disabled={busy}
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
+                  const files = [...(e.target.files ?? [])];
                   e.target.value = "";
-                  if (file) void loadFile(file);
+                  void loadFiles(files);
                 }}
               />
             </label>

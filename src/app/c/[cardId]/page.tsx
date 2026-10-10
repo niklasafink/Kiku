@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { ArrowLeft, ArrowRight, CalendarDays, Keyboard, Mic, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Keyboard, Mic, PenLine, Play, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { GradedSolution } from "@/components/GradedSolution";
 import { Modal } from "@/components/Modal";
 import { RichEditor } from "@/components/RichEditor";
+import { StarButton, tagCounts, TagEditor } from "@/components/Tags";
 import { ScoreBadge, ScoreChart, Trend } from "@/components/score";
 import { db } from "@/lib/db";
 import { formatDateTime, inDays, pluralize } from "@/lib/format";
@@ -16,6 +17,7 @@ import { useAllCards, useFolders } from "@/lib/hooks";
 import { attemptsForCard, deleteAttempt, deleteCard, updateCard } from "@/lib/repo";
 import { toPlainText } from "@/lib/richText";
 import { daysUntil, scheduleOf } from "@/lib/srs";
+import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
 import { folderOptions } from "@/lib/tree";
 import type { Attempt, Card, Folder } from "@/lib/types";
 
@@ -23,7 +25,7 @@ function CardEditor({ card, folders }: { card: Card; folders: Folder[] }) {
   const [question, setQuestion] = useState(card.question);
   const [solution, setSolution] = useState(card.solution);
   const dirty = question.trim() !== card.question || solution.trim() !== card.solution;
-  const valid = question.trim() && solution.trim();
+  const valid = question.trim() && solution.trim() && question.length <= MAX_CARD_TEXT && solution.length <= MAX_CARD_TEXT;
 
   return (
     <form
@@ -101,6 +103,8 @@ function History({ attempts }: { attempts: Attempt[] }) {
                 <summary className="collapse-title flex flex-wrap items-center gap-x-3 gap-y-1">
                   {attempt.inputMode === "voice" ? (
                     <Mic className="size-4 opacity-60" aria-label="Gesprochen" />
+                  ) : attempt.inputMode === "pen" ? (
+                    <PenLine className="size-4 opacity-60" aria-label="Handgeschrieben" />
                   ) : (
                     <Keyboard className="size-4 opacity-60" aria-label="Getippt" />
                   )}
@@ -212,8 +216,12 @@ export default function CardPage() {
         <h2 id="edit-heading" className="mb-2.5 text-xs font-extrabold tracking-wide uppercase opacity-60">
           Karte
         </h2>
-        {/* Re-keyed after each save so the form picks up the stored values. */}
-        <CardEditor key={card.updatedAt} card={card} folders={folders} />
+        {/* Re-keyed when the stored text changes, so the form picks it up; a new tag leaves unsaved typing alone. */}
+        <CardEditor key={`${card.question}\u0000${card.solution}`} card={card} folders={folders} />
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <StarButton card={card} />
+          <TagEditor card={card} known={tagCounts(allCards).map((entry) => entry.tag)} />
+        </div>
       </section>
 
       <section aria-labelledby="history-heading">

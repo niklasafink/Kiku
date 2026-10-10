@@ -7,6 +7,10 @@ const ms = z.number().int().nonnegative();
 /** Longest question or solution a card may have. */
 export const MAX_CARD_TEXT = 20_000;
 
+/** Tags per card and their length; plenty for marking cards, small enough to stay tidy. */
+export const MAX_TAGS = 12;
+export const MAX_TAG_LENGTH = 40;
+
 export const folderRow = z.object({
   id,
   parentId: id.nullable(),
@@ -22,6 +26,7 @@ export const cardRow = z.object({
   folderId: id,
   question: z.string().max(MAX_CARD_TEXT),
   solution: z.string().max(MAX_CARD_TEXT),
+  tags: z.array(z.string().min(1).max(MAX_TAG_LENGTH)).max(MAX_TAGS).optional(),
   createdAt: ms,
   updatedAt: ms,
 });
@@ -31,7 +36,7 @@ export const attemptRow = z.object({
   cardId: id,
   createdAt: ms,
   updatedAt: ms,
-  inputMode: z.enum(["voice", "text"]),
+  inputMode: z.enum(["voice", "text", "pen"]),
   answerText: z.string().max(50_000),
   solutionSnapshot: z.string().max(20_000),
   segments: z.array(

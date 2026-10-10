@@ -71,3 +71,11 @@ describe("markdownToHtml", () => {
     expect(markdownToHtml("Text\n\n![](kiku-img:abc-1)")).toBe("Text");
   });
 });
+
+describe("formulas in HTML", () => {
+  it("reads MathJax notation as Anki writes it and writes it back", () => {
+    const markdown = htmlToMarkdown("Es gilt \\(E = mc^2\\).<br>\\[ \\frac{a}{b} \\]");
+    expect(markdown).toBe("Es gilt $E = mc^2$.\n$$\\frac{a}{b}$$");
+    expect(markdownToHtml("Es gilt $a < b$.\n\n$$\nx^2\n$$")).toBe("Es gilt \\(a &lt; b\\).<br><br>\\[x^2\\]");
+  });
+});

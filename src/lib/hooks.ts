@@ -52,3 +52,12 @@ export function useSavedSession(folderId: string | null) {
     return found.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
   }, [folderId]);
 }
+
+/** Time and score of every attempt, oldest first; undefined while loading. Enough for statistics. */
+export function useAttemptLog() {
+  return useLiveQuery(async () => {
+    const log: { cardId: string; createdAt: number; score: number }[] = [];
+    await db.attempts.orderBy("createdAt").each((a) => log.push({ cardId: a.cardId, createdAt: a.createdAt, score: a.score }));
+    return log;
+  }, []);
+}

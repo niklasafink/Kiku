@@ -1,7 +1,8 @@
 // Pictures used in cards. Each one is uploaded once and never changes afterwards.
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, inArray, isNull, like, lt, or } from "drizzle-orm";
+import { imageIds } from "@/lib/richText";
 import type { Database } from "./db";
-import { images } from "./schema";
+import { cards, images } from "./schema";
 
 /** The browser scales pictures down to 1.5 MB at most; a little room on top. */
 export const MAX_IMAGE_BYTES = 2_000_000;
@@ -44,4 +45,34 @@ export async function getImage(db: Database, userId: string, id: string): Promis
     .from(images)
     .where(and(eq(images.id, id), eq(images.userId, userId)));
   return row ? { mime: row.mime, bytes: Buffer.from(row.data, "base64") } : null;
+}
+
+/** A picture no card uses is removed once it is this old; until then its card may still be on its way. */
+const UNUSED_AFTER_MS = 7 * 86_400_000;
+
+/** Deletes the account's pictures that none of its cards refers to any more. Returns how many. */
+export async function deleteUnusedImages(db: Database, userId: string, now = Date.now()): Promise<number> {
+  const candidates = await db
+    .select({ id: images.id })
+    .from(images)
+    .where(and(eq(images.userId, userId), lt(images.createdAt, now - UNUSED_AFTER_MS)));
+  if (candidates.length === 0) return 0;
+
+  const texts = await db
+    .select({ question: cards.question, solution: cards.solution })
+    .from(cards)
+    .where(
+      and(
+        eq(cards.userId, userId),
+        isNull(cards.deletedAt),
+        or(like(cards.question, "%kiku-img:%"), like(cards.solution, "%kiku-img:%")),
+      ),
+    );
+  const used = new Set(texts.flatMap((card) => [...imageIds(card.question), ...imageIds(card.solution)]));
+  const unused = candidates.map((image) => image.id).filter((id) => !used.has(id));
+  // In pieces, to stay well below the limit of parameters per statement.
+  for (let i = 0; i < unused.length; i += 500) {
+    await db.delete(images).where(and(eq(images.userId, userId), inArray(images.id, unused.slice(i, i + 500))));
+  }
+  return unused.length;
 }

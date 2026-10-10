@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "./db";
-import { getImage, isImageId, putImage } from "./images";
+import { deleteUnusedImages, getImage, isImageId, putImage } from "./images";
+import { cards, images } from "./schema";
+import { eq } from "drizzle-orm";
 import { GENERATE_LIMITS, refundGenerateQuota, takeGenerateQuota } from "./quota";
 import { createTestDb } from "./testDb";
 
@@ -31,6 +33,41 @@ describe("images", () => {
     expect(isImageId("3f2b8c1e-aaaa-4bbb-8ccc-1234567890ab")).toBe(true);
     expect(isImageId("../secret")).toBe(false);
     expect(isImageId("short")).toBe(false);
+  });
+});
+
+describe("deleteUnusedImages", () => {
+  const DAY = 86_400_000;
+  const now = 100 * DAY;
+  const card = (id: string, userId: string, solution: string, deletedAt: number | null = null) => ({
+    id,
+    userId,
+    folderId: "f",
+    question: "q",
+    solution,
+    createdAt: 1,
+    updatedAt: 1,
+    deletedAt,
+    rev: 1,
+  });
+
+  it("removes old pictures no card uses and keeps used, recent and other accounts' pictures", async () => {
+    for (const [id, user] of [["used-0001", "u1"], ["orphan-0001", "u1"], ["deleted-card-1", "u1"], ["recent-0001", "u1"], ["other-0001", "u2"]]) {
+      await putImage(db, user, { id, mime: "image/webp", bytes });
+    }
+    await db.update(images).set({ createdAt: now - 30 * DAY });
+    await db.update(images).set({ createdAt: now - 2 * DAY }).where(eq(images.id, "recent-0001"));
+    await db.insert(cards).values([
+      card("c1", "u1", "Text\n\n![](kiku-img:used-0001)"),
+      card("c2", "u1", "![](kiku-img:deleted-card-1)", now - DAY),
+      // Another account naming the picture does not keep it alive.
+      card("c3", "u2", "![](kiku-img:orphan-0001)"),
+    ]);
+
+    expect(await deleteUnusedImages(db, "u1", now)).toBe(2);
+    const left = (await db.select({ id: images.id }).from(images)).map((row) => row.id).sort();
+    expect(left).toEqual(["other-0001", "recent-0001", "used-0001"]);
+    expect(await deleteUnusedImages(db, "u1", now)).toBe(0);
   });
 });
 

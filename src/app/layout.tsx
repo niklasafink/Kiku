@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Nunito } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
+// Part of the marketing website (src/app/(website)); without it the import falls back to src/websiteFallback.
+import { Analytics } from "@website/Analytics";
 import { SERVER_MODE } from "@/server/auth";
 import "./globals.css";
 
@@ -34,6 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="min-h-full font-sans">
         <AppShell serverMode={SERVER_MODE}>{children}</AppShell>
+        {SERVER_MODE && <Analytics />}
       </body>
     </html>
   );

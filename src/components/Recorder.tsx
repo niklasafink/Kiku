@@ -9,6 +9,9 @@ import { dictationAvailable, startDictation } from "@/lib/speech";
 // Safety net against a recording that was forgotten; length itself is not a technical limit.
 const MAX_SECONDS = 30 * 60;
 
+/** Input level (RMS) above which sound counts as speech rather than room noise. */
+const SPEECH_LEVEL = 0.02;
+
 type Phase = "idle" | "starting" | "recording" | "transcribing";
 
 async function transcribe(
@@ -42,6 +45,8 @@ export function Recorder({
   endpoint = "/api/transcribe",
   browser = false,
   compact = false,
+  autoStart = 0,
+  stopAfterSilence,
 }: {
   onTranscript: (text: string) => void;
   disabled?: boolean;
@@ -50,6 +55,10 @@ export function Recorder({
   browser?: boolean;
   /** Smaller button with a short status line, for sitting beside a text field. */
   compact?: boolean;
+  /** Starts a recording whenever this changes to a new non-zero value (hands-free studying). */
+  autoStart?: number;
+  /** Ends the recording by itself after this many milliseconds of silence, once something was said. */
+  stopAfterSilence?: number;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [seconds, setSeconds] = useState(0);
@@ -122,6 +131,7 @@ export function Recorder({
   }
 
   async function start() {
+    if (phase !== "idle") return;
     setError(null);
     if (browser) return startInBrowser();
     if (!navigator.mediaDevices?.getUserMedia || typeof AudioWorkletNode === "undefined") {
@@ -171,10 +181,20 @@ export function Recorder({
       );
     });
 
+    // For stopping by itself: when something was last loud enough to be speech.
+    let lastSpeech = 0;
     const capture = new AudioWorkletNode(audioContext, "pcm-capture");
     capture.port.onmessage = (event: MessageEvent<Float32Array>) => {
       const level = rms(event.data);
       segmenter.push(event.data, level);
+      if (stopAfterSilence) {
+        const now = performance.now();
+        if (level > SPEECH_LEVEL) lastSpeech = now;
+        else if (lastSpeech > 0 && now - lastSpeech > stopAfterSilence) {
+          lastSpeech = 0;
+          stopRef.current();
+        }
+      }
       // Input level drives the pulsing ring; written straight to the DOM to avoid re-rendering per batch.
       if (ringRef.current) ringRef.current.style.transform = `scale(${1 + Math.min(1, level * 4) * 0.7})`;
     };
@@ -223,6 +243,17 @@ export function Recorder({
     setSeconds(0);
     setPhase("recording");
   }
+
+  // Always the current start(), for the timer below.
+  const startRef = useRef(start);
+  useEffect(() => {
+    startRef.current = start;
+  });
+  useEffect(() => {
+    if (!autoStart) return;
+    const timer = setTimeout(() => void startRef.current(), 0);
+    return () => clearTimeout(timer);
+  }, [autoStart]);
 
   const busy = phase === "starting" || phase === "transcribing";
   const size = compact ? "size-12" : "size-16";

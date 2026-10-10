@@ -2,6 +2,7 @@
 // a server database or sync layer can later be added behind these functions.
 import { z } from "zod";
 import { db } from "./db";
+import { MAX_TAG_LENGTH, MAX_TAGS } from "./syncProtocol";
 import { descendantIds } from "./tree";
 import type { Attempt, Card, Folder, SavedSession } from "./types";
 
@@ -72,7 +73,7 @@ const IMPORT_BATCH = 2000;
 /** Adds many cards at once, keeping their order. `onProgress` is called with the number stored so far. */
 export async function createCards(
   folderId: string,
-  rows: { question: string; solution: string }[],
+  rows: { question: string; solution: string; tags?: string[] }[],
   onProgress?: (done: number) => void,
 ): Promise<number> {
   const now = Date.now();
@@ -83,6 +84,7 @@ export async function createCards(
       folderId,
       question: row.question.trim(),
       solution: row.solution.trim(),
+      ...(row.tags?.length ? { tags: row.tags } : {}),
       createdAt: now + start + i,
       updatedAt: now + start + i,
     }));
@@ -97,6 +99,29 @@ export async function updateCard(
   patch: Partial<Pick<Card, "question" | "solution" | "folderId">>,
 ): Promise<void> {
   await db.cards.update(id, { ...patch, updatedAt: Date.now() });
+}
+
+/** Tidy form of a tag as typed: no "#", single spaces. */
+export function cleanTag(tag: string): string {
+  return tag.replace(/^#+/, "").replace(/\s+/g, " ").trim().slice(0, MAX_TAG_LENGTH);
+}
+
+/** Replaces the tags of a card. Duplicates (ignoring case) and empty ones drop out. */
+export async function setCardTags(id: string, tags: string[]): Promise<void> {
+  const seen = new Set<string>();
+  const clean = tags.map(cleanTag).filter((tag) => {
+    const key = tag.toLocaleLowerCase("de");
+    if (!tag || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  await db.cards.update(id, { tags: clean.slice(0, MAX_TAGS), updatedAt: Date.now() });
+}
+
+/** Adds the tag to the card, or takes it away if the card has it. */
+export async function toggleCardTag(id: string, tag: string): Promise<void> {
+  const tags = (await db.cards.get(id))?.tags ?? [];
+  await setCardTags(id, tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag]);
 }
 
 export async function deleteCard(id: string): Promise<void> {
@@ -183,6 +208,7 @@ const backupSchema = z.object({
       folderId: z.string(),
       question: z.string(),
       solution: z.string(),
+      tags: z.array(z.string()).optional(),
       createdAt: z.number(),
       updatedAt: z.number(),
     }),
@@ -192,7 +218,7 @@ const backupSchema = z.object({
       id: z.string(),
       cardId: z.string(),
       createdAt: z.number(),
-      inputMode: z.enum(["voice", "text"]),
+      inputMode: z.enum(["voice", "text", "pen"]),
       answerText: z.string(),
       solutionSnapshot: z.string(),
       segments: z.array(segmentSchema),
