@@ -1,6 +1,4 @@
 import { Home } from "@/components/Home";
-// The marketing website lives in src/app/(website), outside the repository; without it
-// the import falls back to src/websiteFallback.
 import { Landing } from "@website/Landing";
 import { currentUser, SERVER_MODE } from "@/server/auth";
 

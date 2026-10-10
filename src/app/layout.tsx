@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Nunito } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
-// Part of the marketing website (src/app/(website)); without it the import falls back to src/websiteFallback.
 import { Analytics } from "@website/Analytics";
 import { SERVER_MODE } from "@/server/auth";
 import "./globals.css";
