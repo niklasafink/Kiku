@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, Square } from "lucide-react";
 import { createSegmenter, pcmToWav, rms } from "@/lib/audio";
 import { formatDuration } from "@/lib/format";
+import { dictationAvailable, startDictation } from "@/lib/speech";
 
 // Safety net against a recording that was forgotten; length itself is not a technical limit.
 const MAX_SECONDS = 30 * 60;
@@ -34,16 +35,19 @@ async function transcribe(
   }
 }
 
-/** Records from the microphone and hands back the AI transcript. */
+/** Records from the microphone and hands back the transcript. */
 export function Recorder({
   onTranscript,
   disabled,
   endpoint = "/api/transcribe",
+  browser = false,
   compact = false,
 }: {
   onTranscript: (text: string) => void;
   disabled?: boolean;
   endpoint?: string;
+  /** Transcribe with the browser's own speech recognition instead of the AI behind the endpoint. */
+  browser?: boolean;
   /** Smaller button with a short status line, for sitting beside a text field. */
   compact?: boolean;
 }) {
@@ -65,8 +69,61 @@ export function Recorder({
     };
   }, []);
 
+  /** Counts the seconds and keeps the screen on, since a locked device stops the microphone. */
+  function startClock(): () => void {
+    const wakeLock = navigator.wakeLock?.request("screen").catch(() => null);
+    let elapsed = 0;
+    const timer = setInterval(() => {
+      elapsed += 1;
+      setSeconds(elapsed);
+      if (elapsed >= MAX_SECONDS) stopRef.current();
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+      void wakeLock?.then((lock) => lock?.release());
+    };
+  }
+
+  function startInBrowser() {
+    if (!dictationAvailable()) {
+      setError("Die Spracheingabe gibt es hier nur in Chrome, Edge und Safari. Tippe deine Antwort oder wechsle den Browser.");
+      return;
+    }
+    const stopClock = startClock();
+    const release = () => {
+      stopClock();
+      stopRef.current = () => {};
+      cleanupRef.current = () => {};
+    };
+    const dictation = startDictation((reason) => {
+      release();
+      setError(
+        reason === "denied"
+          ? "Kein Zugriff auf das Mikrofon. Bitte erlaube den Zugriff in den Browser-Einstellungen."
+          : "Die Spracherkennung des Browsers ist ausgefallen. Versuch es noch einmal oder tippe deine Antwort.",
+      );
+      setPhase("idle");
+    });
+    cleanupRef.current = () => {
+      dictation.cancel();
+      release();
+    };
+    stopRef.current = async () => {
+      release();
+      setPhase("transcribing");
+      const text = await dictation.stop();
+      if (!mountedRef.current) return;
+      if (text) onTranscript(text);
+      else setError("Es wurde nichts Verständliches erkannt. Versuch es noch einmal.");
+      setPhase("idle");
+    };
+    setSeconds(0);
+    setPhase("recording");
+  }
+
   async function start() {
     setError(null);
+    if (browser) return startInBrowser();
     if (!navigator.mediaDevices?.getUserMedia || typeof AudioWorkletNode === "undefined") {
       setError("Das Mikrofon ist hier nicht verfügbar. Es funktioniert nur über HTTPS oder localhost.");
       return;
@@ -125,22 +182,13 @@ export function Recorder({
     // The node only runs while it leads to the output; it never writes to it, so nothing is played back.
     capture.connect(audioContext.destination);
 
-    // Keeps the screen on, since a locked device stops the microphone.
-    const wakeLock = navigator.wakeLock?.request("screen").catch(() => null);
-
-    let elapsed = 0;
-    const timer = setInterval(() => {
-      elapsed += 1;
-      setSeconds(elapsed);
-      if (elapsed >= MAX_SECONDS) stopRef.current();
-    }, 1000);
+    const stopClock = startClock();
 
     const release = () => {
-      clearInterval(timer);
+      stopClock();
       capture.port.onmessage = null;
       stream.getTracks().forEach((track) => track.stop());
       void audioContext.close();
-      void wakeLock?.then((lock) => lock?.release());
       stopRef.current = () => {};
       cleanupRef.current = () => {};
     };
@@ -188,7 +236,12 @@ export function Recorder({
           className={`relative grid ${size} place-items-center rounded-full bg-error text-error-content`}
           aria-label="Aufnahme beenden"
         >
-          <span ref={ringRef} className="absolute inset-0 rounded-full bg-error/30 transition-transform duration-100" aria-hidden />
+          {/* The browser's recognition reports no input level, so there the ring just pulses. */}
+          <span
+            ref={ringRef}
+            className={`absolute inset-0 rounded-full bg-error/30 ${browser ? "scale-125 animate-pulse" : "transition-transform duration-100"}`}
+            aria-hidden
+          />
           <Square className={compact ? "relative size-4" : "relative size-6"} fill="currentColor" />
         </button>
       ) : (

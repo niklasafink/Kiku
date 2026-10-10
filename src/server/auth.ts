@@ -1,4 +1,5 @@
 import { createNeonAuth } from "@neondatabase/auth/next/server";
+import { planOf, type Plan } from "./plan";
 
 /**
  * With a database and Neon Auth configured the app runs in server mode: accounts, sync and
@@ -40,8 +41,12 @@ export async function requireUser(): Promise<CurrentUser | Response> {
   return (await currentUser()) ?? UNAUTHORIZED();
 }
 
-/** For routes that also work in local mode (AI calls): open locally, signed-in users only on a server. */
-export async function denyIfSignedOut(): Promise<Response | null> {
-  if (!SERVER_MODE) return null;
-  return (await currentUser()) ? null : UNAUTHORIZED();
+/**
+ * For routes that also work in local mode (AI calls): the caller's plan, or the response to send
+ * instead. Locally the operator's own key pays, so everything is on; on a server only for signed-in users.
+ */
+export async function planOrDeny(): Promise<Plan | Response> {
+  if (!SERVER_MODE) return "paid";
+  const user = await currentUser();
+  return user ? planOf(user) : UNAUTHORIZED();
 }

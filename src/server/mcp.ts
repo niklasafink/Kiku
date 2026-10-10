@@ -106,7 +106,7 @@ export function createMcpServer(db: Database, userId: string): McpServer {
     "create_cards",
     {
       description:
-        "Add one or more flashcards to a folder. The solution is the model answer the student's spoken or typed answer is later compared with, so write it as complete statements.",
+        "Add one or more flashcards to a folder. The solution is the model answer the student's spoken or typed answer is later compared with, so write it as complete statements. Both texts may use Markdown: **bold**, *italic*, ==marked==, lists, headings and tables.",
       inputSchema: {
         folderId: z.string(),
         cards: z

@@ -1,6 +1,7 @@
 // Browser half of the sync. The app keeps working on IndexedDB; this module sends local
 // changes to the server and applies what other devices (or the MCP server) changed.
 import { db, type Tombstone } from "./db";
+import { uploadPendingImages } from "./images";
 import {
   SYNC_PAGE,
   SYNC_TABLES,
@@ -14,7 +15,7 @@ type Row = { id: string; updatedAt: number; dirty?: number } & Record<string, un
 type Exchange = (request: { cursor: number; changes: ChangeSet }) => Promise<SyncResponse>;
 
 const FIELDS: Record<SyncTable, string[]> = {
-  folders: ["id", "parentId", "name", "emoji", "createdAt", "updatedAt"],
+  folders: ["id", "parentId", "name", "emoji", "examDate", "createdAt", "updatedAt"],
   cards: ["id", "folderId", "question", "solution", "createdAt", "updatedAt"],
   attempts: [
     "id",
@@ -138,9 +139,11 @@ export async function bindToUser(userId: string): Promise<void> {
 
 /** Removes all synced data from this device (not from the server). */
 export async function wipeLocal(): Promise<void> {
-  await db.transaction("rw", [db.folders, db.cards, db.attempts, db.sessions, db.tombstones, db.meta], async (tx) => {
+  const tables = [db.folders, db.cards, db.attempts, db.sessions, db.tombstones, db.meta, db.images];
+  await db.transaction("rw", tables, async (tx) => {
     db.remote.add(tx);
     await Promise.all([
+      db.images.clear(),
       db.folders.clear(),
       db.cards.clear(),
       db.attempts.clear(),
@@ -202,6 +205,7 @@ export function syncNow(): Promise<void> {
       do {
         again = false;
         await runSync(postSync);
+        await uploadPendingImages();
       } while (again);
       setState({ status: "idle", lastSyncedAt: Date.now(), error: null });
     } catch (error) {

@@ -6,20 +6,40 @@ import { Suspense, useEffect, useState } from "react";
 import { Play, RotateCcw } from "lucide-react";
 import { StudySession } from "@/components/StudySession";
 import { formatDateTime } from "@/lib/format";
-import { useAllCards, useFolders, useLatestAttempts } from "@/lib/hooks";
-import { loadSession, sessionKey } from "@/lib/repo";
-import { isWeak } from "@/lib/study";
+import { useAllCards, useFolders, useLatestAttempts, useSchedules } from "@/lib/hooks";
+import { loadSession, sessionKey, type StudyMode } from "@/lib/repo";
+import { planToday } from "@/lib/srs";
+import { EXAM_CARDS, isWeak, shuffled } from "@/lib/study";
 import { descendantIds } from "@/lib/tree";
 import type { Card, SavedSession } from "@/lib/types";
 
 const SKELETON = <div className="skeleton h-64 w-full rounded-box" />;
 
-function FolderSession({ folderId, weakOnly, autoResume }: { folderId: string; weakOnly: boolean; autoResume: boolean }) {
+const EMPTY: Record<StudyMode, string> = {
+  all: "In diesem Ordner gibt es noch keine Karten.",
+  weak: "Keine schwachen Karten mehr. Alles sitzt!",
+  due: "Für heute ist alles erledigt.",
+};
+
+function FolderSession({
+  folderId,
+  mode,
+  autoResume,
+  exam,
+}: {
+  folderId: string;
+  mode: StudyMode;
+  autoResume: boolean;
+  /** Exam simulation: a random draw, graded at the end. It is not stored for later. */
+  exam: boolean;
+}) {
   const folders = useFolders();
   const allCards = useAllCards();
   const latest = useLatestAttempts();
+  const schedules = useSchedules();
   const backHref = `/f/${folderId}`;
-  const key = sessionKey(folderId, weakOnly);
+  const key = sessionKey(folderId, mode);
+  const [now] = useState(() => Date.now());
 
   // Read once: the running session keeps writing to this entry.
   const [saved, setSaved] = useState<SavedSession | null | undefined>(undefined);
@@ -36,13 +56,13 @@ function FolderSession({ folderId, weakOnly, autoResume }: { folderId: string; w
     };
   }, [key]);
 
-  if (!folders || !allCards || !latest || saved === undefined) return SKELETON;
+  if (!folders || !allCards || !latest || !schedules || saved === undefined) return SKELETON;
 
   // Cards deleted in the meantime drop out; edited ones show their current text.
   const byId = new Map(allCards.map((c) => [c.id, c]));
   const savedCards = saved ? saved.cardIds.flatMap((id) => byId.get(id) ?? []) : [];
 
-  if (saved && savedCards.length > 0 && choice !== "fresh") {
+  if (!exam && saved && savedCards.length > 0 && choice !== "fresh") {
     const index = Math.max(0, savedCards.findIndex((c) => c.id === saved.cardIds[saved.index]));
     if (choice === "resume") {
       return (
@@ -78,20 +98,23 @@ function FolderSession({ folderId, weakOnly, autoResume }: { folderId: string; w
 
   if (!fresh) {
     const ids = new Set(descendantIds(folders, folderId));
-    setFresh(
-      allCards
-        .filter((c) => ids.has(c.folderId) && (!weakOnly || isWeak(latest.get(c.id))))
-        .sort((a, b) => a.createdAt - b.createdAt),
-    );
+    const inFolder = allCards.filter((c) => ids.has(c.folderId)).sort((a, b) => a.createdAt - b.createdAt);
+    if (exam) {
+      setFresh(shuffled(inFolder).slice(0, EXAM_CARDS));
+    } else if (mode === "due") {
+      // Repetitions first: they are the ones that slip away if the day runs out.
+      const today = planToday(inFolder, schedules, folders, now);
+      setFresh([...today.due, ...today.fresh]);
+    } else {
+      setFresh(mode === "weak" ? inFolder.filter((c) => isWeak(latest.get(c.id))) : inFolder);
+    }
     return SKELETON;
   }
 
   if (fresh.length === 0) {
     return (
       <div className="tile p-8 text-center">
-        <p className="text-lg font-bold">
-          {weakOnly ? "Keine schwachen Karten mehr. Alles sitzt!" : "In diesem Ordner gibt es noch keine Karten."}
-        </p>
+        <p className="text-lg font-bold">{EMPTY[mode]}</p>
         <Link href={backHref} className="btn btn-primary btn-chunky mt-4">
           Zurück zum Ordner
         </Link>
@@ -99,19 +122,22 @@ function FolderSession({ folderId, weakOnly, autoResume }: { folderId: string; w
     );
   }
 
-  return <StudySession key="fresh" cards={fresh} backHref={backHref} sessionKey={key} />;
+  return <StudySession key="fresh" cards={fresh} backHref={backHref} sessionKey={exam ? undefined : key} exam={exam} />;
 }
 
 function FolderLearn() {
   const { folderId } = useParams<{ folderId: string }>();
   const params = useSearchParams();
-  const weakOnly = params.get("mode") === "weak";
+  const requested = params.get("mode");
+  const mode: StudyMode = requested === "weak" || requested === "due" ? requested : "all";
+  const exam = params.get("exam") === "1";
   return (
     <FolderSession
-      key={`${folderId}-${weakOnly}`}
+      key={`${folderId}-${mode}-${exam}`}
       folderId={folderId}
-      weakOnly={weakOnly}
+      mode={mode}
       autoResume={params.get("resume") === "1"}
+      exam={exam}
     />
   );
 }

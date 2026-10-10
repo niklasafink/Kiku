@@ -15,6 +15,13 @@
       "when": 1791465283449,
       "tag": "0001_short_ultragirl",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791622383836,
+      "tag": "0002_acoustic_wildside",
+      "breakpoints": true
     }
   ]
 }

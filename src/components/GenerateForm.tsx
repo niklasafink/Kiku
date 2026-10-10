@@ -1,0 +1,310 @@
+"use client";
+
+import { useRef, useState, type DragEvent } from "react";
+import { FileText, FileUp, Sparkles, Trash2, X } from "lucide-react";
+import { chunkPages } from "@/lib/chunks";
+import { pluralize } from "@/lib/format";
+import { MATERIAL_ACCEPT, MaterialError, readMaterial } from "@/lib/material";
+
+interface Draft {
+  id: number;
+  question: string;
+  solution: string;
+}
+
+/** Pieces of material per run; with more, the rest of the document is left for a second run. */
+const MAX_CHUNKS = 12;
+const PARALLEL = 2;
+
+type Status =
+  | { step: "idle" }
+  | { step: "reading"; done: number; total: number }
+  | { step: "generating"; done: number; total: number };
+
+/** Upload lecture material or paste text, let the AI propose cards, edit them, then save. */
+export function GenerateForm({
+  onSubmit,
+  onClose,
+}: {
+  onSubmit: (rows: { question: string; solution: string }[]) => void | Promise<void>;
+  onClose: () => void;
+}) {
+  const [material, setMaterial] = useState<{ name: string; pages: string[] } | null>(null);
+  const [text, setText] = useState("");
+  const [focus, setFocus] = useState("");
+  const [status, setStatus] = useState<Status>({ step: "idle" });
+  const [drafts, setDrafts] = useState<Draft[] | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const abort = useRef<AbortController | null>(null);
+  const nextId = useRef(0);
+
+  const pages = material ? material.pages : text.trim() ? text.split(/\n\s*\n/) : [];
+  const busy = status.step !== "idle";
+
+  async function loadFile(file: File) {
+    setError(null);
+    setStatus({ step: "reading", done: 0, total: 0 });
+    try {
+      const read = await readMaterial(file, (done, total) => setStatus({ step: "reading", done, total }));
+      setMaterial({ name: file.name, pages: read });
+    } catch (e) {
+      setError(e instanceof MaterialError ? e.message : "Die Datei konnte nicht gelesen werden.");
+    } finally {
+      setStatus({ step: "idle" });
+    }
+  }
+
+  async function generate() {
+    const all = chunkPages(pages);
+    const chunks = all.slice(0, MAX_CHUNKS);
+    if (chunks.length === 0) return;
+    setError(null);
+    setNotice(
+      all.length > MAX_CHUNKS
+        ? `Das Material ist sehr lang. Verarbeitet wurden etwa die ersten ${Math.round((MAX_CHUNKS / all.length) * 100)} %; für den Rest teile die Datei auf.`
+        : null,
+    );
+    setDrafts([]);
+    setStatus({ step: "generating", done: 0, total: chunks.length });
+    const controller = new AbortController();
+    abort.current = controller;
+
+    // Results arrive out of order; keep the cards in the order of the material.
+    const results: Draft[][] = [];
+    let next = 0;
+    let done = 0;
+    let failure: string | null = null;
+    const worker = async () => {
+      while (next < chunks.length && !failure && !controller.signal.aborted) {
+        const index = next++;
+        try {
+          const response = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: chunks[index], focus }),
+            signal: controller.signal,
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error);
+          results[index] = (data.cards as { question: string; solution: string }[]).map((card) => ({
+            ...card,
+            id: nextId.current++,
+          }));
+          setDrafts(results.flat());
+        } catch (e) {
+          if (controller.signal.aborted) return;
+          failure = e instanceof Error && e.message ? e.message : "Die KI-Anfrage ist fehlgeschlagen.";
+        }
+        setStatus({ step: "generating", done: ++done, total: chunks.length });
+      }
+    };
+    await Promise.all(Array.from({ length: PARALLEL }, worker));
+
+    if (failure) setError(failure);
+    else if (!controller.signal.aborted && results.flat().length === 0) {
+      setError("Aus diesem Material sind keine Karten entstanden.");
+      setDrafts(null);
+    }
+    setStatus({ step: "idle" });
+  }
+
+  function handleDrop(event: DragEvent) {
+    event.preventDefault();
+    const file = event.dataTransfer.files[0];
+    if (file && !busy) void loadFile(file);
+  }
+
+  const patch = (id: number, change: Partial<Draft>) =>
+    setDrafts((list) => list && list.map((draft) => (draft.id === id ? { ...draft, ...change } : draft)));
+  const valid = (drafts ?? []).filter((draft) => draft.question.trim() && draft.solution.trim());
+
+  // Step 2: check and edit what the AI proposed.
+  if (drafts) {
+    return (
+      <form
+        className="flex min-h-0 flex-1 flex-col gap-4"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (valid.length === 0 || saving || busy) return;
+          setSaving(true);
+          await onSubmit(valid.map(({ question, solution }) => ({ question, solution })));
+          onClose();
+        }}
+      >
+        <div className="flex flex-wrap items-center gap-3" aria-live="polite">
+          <p className="mr-auto text-sm">
+            <span className="font-bold">{pluralize(drafts.length, "Vorschlag", "Vorschläge")}.</span>{" "}
+            <span className="opacity-70">Prüfe sie, ändere, was nicht passt, und entferne, was du nicht brauchst.</span>
+          </p>
+          {status.step === "generating" && (
+            <>
+              <progress className="progress progress-primary h-2.5 w-40" value={status.done} max={status.total} aria-label="KI erstellt Karten" />
+              <span className="text-sm tabular-nums opacity-70">
+                Abschnitt {Math.min(status.done + 1, status.total)} von {status.total}
+              </span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => abort.current?.abort()}>
+                Stoppen
+              </button>
+            </>
+          )}
+        </div>
+        {notice && <p className="alert alert-warning alert-soft text-sm">{notice}</p>}
+        {error && (
+          <p role="alert" className="alert alert-error alert-soft">
+            {error}
+          </p>
+        )}
+
+        <ul className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+          {drafts.map((draft, i) => (
+            <li key={draft.id} className="grid gap-2 rounded-field border-2 border-base-300 p-3 md:grid-cols-[1fr_1.4fr_auto]">
+              <textarea
+                className="textarea min-h-24 w-full font-bold [field-sizing:content]"
+                value={draft.question}
+                onChange={(e) => patch(draft.id, { question: e.target.value })}
+                aria-label={`Frage ${i + 1}`}
+              />
+              <textarea
+                className="textarea min-h-24 w-full [field-sizing:content]"
+                value={draft.solution}
+                onChange={(e) => patch(draft.id, { solution: e.target.value })}
+                aria-label={`Lösung ${i + 1}`}
+              />
+              <button
+                type="button"
+                className="btn btn-ghost btn-square btn-sm justify-self-end"
+                onClick={() => setDrafts((list) => list && list.filter((other) => other.id !== draft.id))}
+                aria-label={`Vorschlag ${i + 1} entfernen`}
+                title="Entfernen"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </li>
+          ))}
+          {status.step === "generating" && <li className="skeleton h-24 shrink-0 rounded-field" aria-hidden />}
+        </ul>
+
+        <div className="modal-action mt-0">
+          <button
+            type="button"
+            className="btn btn-ghost mr-auto"
+            onClick={() => {
+              abort.current?.abort();
+              setDrafts(null);
+              setError(null);
+            }}
+            disabled={saving}
+          >
+            Zurück
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
+            Abbrechen
+          </button>
+          <button type="submit" className="btn btn-primary btn-chunky" disabled={valid.length === 0 || saving || busy}>
+            {pluralize(valid.length, "Karte", "Karten")} speichern
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  // Step 1: choose the material.
+  return (
+    <form
+      className="flex min-h-0 flex-1 flex-col gap-4"
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={handleDrop}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!busy) void generate();
+      }}
+    >
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+        <p className="text-sm opacity-70">
+          Lade Vorlesungsfolien, ein Skript oder deine Notizen hoch (PDF, PowerPoint, Word, Text) oder füge Text ein.
+          Die KI schlägt Karten mit Frage und ausformulierter Lösung vor; du prüfst sie, bevor etwas gespeichert wird.
+        </p>
+
+        {material ? (
+          <div className="flex items-center gap-3 rounded-field border-2 border-base-300 px-4 py-3">
+            <FileText className="size-5 shrink-0 opacity-60" aria-hidden />
+            <span className="min-w-0 flex-1 truncate font-bold">{material.name}</span>
+            <span className="shrink-0 text-sm opacity-70">{pluralize(material.pages.length, "Abschnitt", "Abschnitte")}</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setMaterial(null)} disabled={busy}>
+              <X className="size-4" /> Entfernen
+            </button>
+          </div>
+        ) : (
+          <>
+            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-box border-2 border-dashed border-base-300 px-4 py-8 text-center hover:border-primary">
+              {status.step === "reading" ? (
+                <>
+                  <span className="loading loading-spinner" />
+                  <span className="font-bold">
+                    Datei wird gelesen{status.total > 0 && ` · Seite ${status.done} von ${status.total}`}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <FileUp className="size-7 opacity-60" aria-hidden />
+                  <span className="font-bold">Datei wählen oder hierher ziehen</span>
+                  <span className="text-sm opacity-70">PDF, .pptx, .docx, .txt</span>
+                </>
+              )}
+              <input
+                type="file"
+                accept={MATERIAL_ACCEPT}
+                className="hidden"
+                disabled={busy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void loadFile(file);
+                }}
+              />
+            </label>
+            <label className="flex min-h-0 flex-1 flex-col gap-1.5">
+              <span className="text-sm font-bold">Oder Text einfügen</span>
+              <textarea
+                className="textarea min-h-32 w-full flex-1"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Text aus dem Skript, einer Zusammenfassung oder deinen Notizen …"
+              />
+            </label>
+          </>
+        )}
+
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-bold">
+            Schwerpunkt <span className="font-normal opacity-60">(optional)</span>
+          </span>
+          <input
+            className="input w-full"
+            value={focus}
+            onChange={(e) => setFocus(e.target.value)}
+            maxLength={300}
+            placeholder="z. B. nur Definitionen und Voraussetzungen, Kapitel 3 auslassen"
+          />
+        </label>
+
+        {error && (
+          <p role="alert" className="alert alert-error alert-soft">
+            {error}
+          </p>
+        )}
+      </div>
+
+      <div className="modal-action mt-0">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>
+          Abbrechen
+        </button>
+        <button type="submit" className="btn btn-primary btn-chunky" disabled={pages.length === 0 || busy}>
+          <Sparkles className="size-4" /> Karten vorschlagen
+        </button>
+      </div>
+    </form>
+  );
+}

@@ -20,7 +20,13 @@ it works on tablets, phones, Mac and Windows alike. On iPad you can add it to th
 ## Features
 
 - Folders with any depth of subfolders, cards with question and solution side by side; folders and cards can be moved
-- Bulk import: paste two columns from a spreadsheet, or load a CSV/TSV/text file
+- Rich cards: bold, italic, highlighting, headings, lists, tables and pictures. Pictures are pasted, dropped or picked; cells copied from a spreadsheet become a table
+- Import: paste a table, or drop an Excel (.xlsx), CSV, TSV or text file; choose which columns hold question and solution. Tens of thousands of rows take about a second
+- Import from Anki: packages (.apkg, .colpkg) with their decks as subfolders, pictures, formatting and cloze notes; text exports with HTML are converted too
+- Export a folder or the whole library as CSV (Excel, Numbers), as a text file for Anki that keeps the formatting, or as plain tab-separated text (Quizlet and others); all of them can be imported again
+- AI cards from your material: upload lecture slides or a script (PDF, PowerPoint, Word, text), review the proposed cards, then save them
+- Spaced repetition: after each answer the card is scheduled for its next repetition (FSRS), with the AI's score as the rating
+- Exam dates: set the day of the exam on a folder and "Heute lernen" hands out what is due plus today's share of the new cards
 - Study a folder including all of its subfolders, only its weak cards, or a single card
 - Jump back and forth between cards while studying (buttons or arrow keys), shuffle, or just reveal a solution
 - Leave a study session at any point and continue it later where you stopped
@@ -50,6 +56,12 @@ Open http://localhost:3000.
 | `OPENROUTER_API_KEY` | yes | | Key from [openrouter.ai/keys](https://openrouter.ai/keys) |
 | `GRADING_MODEL` | no | `openai/gpt-6-luna` | Model that compares answer and solution |
 | `TRANSCRIBE_MODEL` | no | `google/gemini-3.8-flash` | Model that transcribes recordings; must accept audio input |
+| `PAID_EMAILS` | no | | With accounts on: comma-separated e-mail addresses of paid accounts. Everyone else is on the free plan |
+| `FREE_PLAN_GRADING_MODELS` | no | two free models, then a very cheap one | Comma-separated models that grade for the free plan, tried in order |
+
+On the free plan the browser's own speech recognition transcribes (Chrome, Edge, Safari), and
+grading uses free OpenRouter models, falling back to a very cheap one when they are used up.
+Without accounts (local mode) the plans do not apply: your own key pays, the full models run.
 
 ### Using the microphone on another device
 
@@ -69,7 +81,8 @@ and their library syncs between all their devices. The browser still keeps a loc
 works on it directly, so the app stays fast; changes are sent to the server in the background.
 
 Sent to the AI provider in both modes: the question, your solution and your answer for
-grading, and the audio recording for transcription.
+grading, the audio recording for transcription, and the text of material you turn into cards.
+Pictures in cards are never sent to the AI.
 
 ## Accounts, sync and MCP (server mode)
 
@@ -130,6 +143,53 @@ is the share of the solution (by characters) that was labelled `correct`.
 Limits: grading quality depends on the model; it can be wrong, which is why uncertain parts
 are shown in red rather than guessed.
 
+## Cards: text, formatting and pictures
+
+Question and solution are stored as plain text with a small Markdown subset (`**bold**`, `*italic*`,
+`==marked==`, `` `code` ``, `#` headings, `-` and `1.` lists, tables, pictures). The editor's toolbar
+writes that markup; a card without any stays the plain text it always was. Import, export, search
+and the MCP tools all work on this one string.
+
+Pictures are scaled down in the browser (longest edge 1600 px, WebP) and kept in IndexedDB. A card
+refers to one as `![](kiku-img:<id>)`. With an account each picture is uploaded once
+(`/api/images/<id>`) and fetched by other devices when a card shows it. Backups contain them.
+
+For grading, the solution is sent without markup and without pictures: the AI compares text.
+A card whose solution is only a picture can be revealed but not graded.
+
+## Importing from Anki
+
+An Anki package is a ZIP archive with the collection as an SQLite database. It is read in the
+browser without a database library: `src/lib/sqlite.ts` scans the tables, `src/lib/anki.ts` turns
+notes into cards. Both package formats work, the older one and the Zstandard-compressed one that
+current Anki versions write.
+
+- The first field of a note is the question, the other fields together the solution. A cloze
+  note becomes one card: the text with gaps as the question, the full text as the solution.
+- HTML becomes card formatting (`src/lib/html.ts`); colours, fonts and audio are dropped.
+- Pictures are stored like pasted ones. With several decks each deck becomes a subfolder.
+- Scheduling and review history stay in Anki: Kiku grades answers differently, so every
+  imported card starts as new.
+
+## Spaced repetition and exam dates
+
+Nothing extra is stored for scheduling: a card's next date follows from its attempts, replayed
+through [FSRS](https://github.com/open-spaced-repetition/ts-fsrs) with the score as the rating
+(below 40 % again, below 70 % hard, below 90 % good, otherwise easy). Every device therefore
+arrives at the same dates, and history from before this feature counts.
+
+"Heute lernen" contains the cards that are due and today's share of the cards never answered:
+10 per day, or, if the folder (or a parent) has an exam date, the remaining new cards spread
+evenly over the days until three days before the exam. In those last three days every card
+comes up once more. The logic is in `src/lib/srs.ts`.
+
+## AI cards from study material
+
+Files are read in the browser (`src/lib/material.ts`): PDFs with pdf.js, PowerPoint and Word files
+by unzipping them. Only the text is sent to `/api/generate`, in pieces of about four pages, so
+the size of the file does not matter. Scanned pages without a text layer cannot be read yet.
+With accounts on, requests per day are limited (`GENERATE_LIMITS` in `src/server/quota.ts`).
+
 ## How long recordings work
 
 Hosts like Vercel cap a request body at 4.5 MB, which is about two minutes of 16 kHz WAV.
@@ -153,6 +213,13 @@ drizzle/                 database migrations
 src/lib/grading.ts       segment alignment, sentence splitting, scoring
 src/lib/audio.ts         cutting a running recording into pieces, WAV encoding
 src/lib/importCards.ts   parsing pasted tables and CSV files
+src/lib/office.ts        reading .xlsx, .pptx and .docx without a library (src/lib/zip.ts)
+src/lib/anki.ts          reading Anki packages (src/lib/sqlite.ts, src/lib/html.ts)
+src/lib/exportCards.ts   CSV, Anki and tab-separated export
+src/lib/richText.ts      the Markdown subset of cards; src/components/RichText.tsx renders it
+src/lib/images.ts        pictures in cards: scaling, local storage, upload
+src/lib/srs.ts           spaced repetition and the plan towards an exam
+src/server/generate.ts   AI cards from study material
 docs/design-references/  screens of other flashcard apps used as inspiration
 ```
 
@@ -176,9 +243,11 @@ with the OpenRouter provider, Vitest.
 ## Roadmap
 
 - OAuth for the MCP endpoint, so clients without custom headers can connect
-- Spaced repetition scheduling
 - Offline support
-- Images in cards
+- Export as an Anki package (.apkg), so pictures travel to Anki as well
+- Formulas (LaTeX) in cards
+- Reading scanned material (pages without a text layer)
+- Removing pictures from the account when no card uses them any more
 
 ## License
 

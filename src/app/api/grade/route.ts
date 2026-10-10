@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { errorResponse } from "@/lib/ai";
-import { denyIfSignedOut } from "@/server/auth";
+import { errorResponse, FREE_PLAN_GRADING_MODELS } from "@/lib/ai";
+import { planOrDeny } from "@/server/auth";
 import { gradeAnswer } from "@/server/grade";
 
-const MAX_CHARS = 8000;
+// As long as a card may be, see MAX_CARD_TEXT.
+const MAX_CHARS = 20_000;
 // Spoken answers have no time limit; half an hour of speech is roughly 30,000 characters.
 const MAX_ANSWER_CHARS = 40_000;
 
@@ -14,8 +15,8 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const denied = await denyIfSignedOut();
-  if (denied) return denied;
+  const plan = await planOrDeny();
+  if (plan instanceof Response) return plan;
 
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
@@ -24,7 +25,8 @@ export async function POST(request: Request) {
   const { question, solution, answer } = parsed.data;
 
   try {
-    return Response.json(await gradeAnswer(question, solution, answer));
+    const options = plan === "free" ? { models: FREE_PLAN_GRADING_MODELS, thinking: false } : undefined;
+    return Response.json(await gradeAnswer(question, solution, answer, options));
   } catch (error) {
     return errorResponse(error);
   }

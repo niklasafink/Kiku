@@ -4,15 +4,18 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { ArrowLeft, ArrowRight, Keyboard, Mic, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Keyboard, Mic, Play, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { GradedSolution } from "@/components/GradedSolution";
 import { Modal } from "@/components/Modal";
+import { RichEditor } from "@/components/RichEditor";
 import { ScoreBadge, ScoreChart, Trend } from "@/components/score";
 import { db } from "@/lib/db";
-import { formatDateTime, pluralize } from "@/lib/format";
+import { formatDateTime, inDays, pluralize } from "@/lib/format";
 import { useAllCards, useFolders } from "@/lib/hooks";
 import { attemptsForCard, deleteAttempt, deleteCard, updateCard } from "@/lib/repo";
+import { toPlainText } from "@/lib/richText";
+import { daysUntil, scheduleOf } from "@/lib/srs";
 import { folderOptions } from "@/lib/tree";
 import type { Attempt, Card, Folder } from "@/lib/types";
 
@@ -30,23 +33,10 @@ function CardEditor({ card, folders }: { card: Card; folders: Folder[] }) {
         if (dirty && valid) void updateCard(card.id, { question: question.trim(), solution: solution.trim() });
       }}
     >
-      <div className="grid gap-4 md:grid-cols-2">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-bold">Frage</span>
-          <textarea
-            className="textarea min-h-44 w-full"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-bold">Deine Lösung</span>
-          <textarea
-            className="textarea min-h-44 w-full"
-            value={solution}
-            onChange={(e) => setSolution(e.target.value)}
-          />
-        </label>
+      {/* Both fields grow with their text, so a long solution is fully visible while editing. */}
+      <div className="grid items-start gap-5 md:grid-cols-2">
+        <RichEditor label="Frage" value={question} onChange={setQuestion} minHeight="22rem" />
+        <RichEditor label="Deine Lösung" value={solution} onChange={setSolution} minHeight="22rem" />
       </div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <label className="flex flex-col gap-1.5">
@@ -152,6 +142,7 @@ export default function CardPage() {
   const attempts = useLiveQuery(() => attemptsForCard(cardId), [cardId]);
   const allCards = useAllCards();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [now] = useState(() => Date.now());
 
   if (card === undefined || !folders || !attempts || !allCards) {
     return <div className="skeleton h-64 w-full rounded-box" />;
@@ -171,12 +162,13 @@ export default function CardPage() {
   const position = siblings.findIndex((c) => c.id === card.id);
   const previous = siblings[position - 1];
   const next = siblings[position + 1];
+  const schedule = scheduleOf(attempts);
 
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2.5">
         <Breadcrumbs folders={folders} folderId={card.folderId} />
-        <h1 className="text-2xl font-black break-words whitespace-pre-wrap">{card.question}</h1>
+        <h1 className="line-clamp-4 text-2xl font-black break-words whitespace-pre-wrap">{toPlainText(card.question)}</h1>
         <div className="mt-1 flex flex-wrap items-center gap-2.5">
           <Link href={`/c/${card.id}/learn`} className="btn btn-primary btn-chunky">
             <Play className="size-4" fill="currentColor" /> Üben
@@ -204,6 +196,12 @@ export default function CardPage() {
               </button>
             )}
           </div>
+          {schedule && (
+            <span className="flex items-center gap-1.5 text-sm font-semibold opacity-70">
+              <CalendarDays className="size-4" aria-hidden />
+              Nächste Wiederholung {inDays(daysUntil(schedule.due, now))}
+            </span>
+          )}
           <button className="btn btn-ghost ml-auto text-error" onClick={() => setConfirmDelete(true)}>
             <Trash2 className="size-4" /> Löschen
           </button>

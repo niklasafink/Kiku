@@ -76,7 +76,7 @@ describe("createCards", () => {
 describe("sessions", () => {
   it("stores a session per folder and removes it with the folder", async () => {
     const folder = await createFolder("Bio", "🧬", null);
-    const key = sessionKey(folder.id, false);
+    const key = sessionKey(folder.id, "all");
     await saveSession({ key, cardIds: ["a", "b"], index: 1, states: {} });
     expect((await loadSession(key))?.index).toBe(1);
 

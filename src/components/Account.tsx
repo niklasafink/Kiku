@@ -8,6 +8,7 @@ export interface AccountUser {
   id: string;
   email: string;
   name: string;
+  plan: "free" | "paid";
 }
 
 type Account =

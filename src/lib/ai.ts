@@ -2,6 +2,15 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 
 export const GRADING_MODEL = process.env.GRADING_MODEL || "openai/gpt-6-luna";
+// Free accounts: free models first, then the cheapest paid one that still grades reliably.
+// OpenRouter caps free models per day for the whole key; once they are used up the last one takes over.
+export const FREE_PLAN_GRADING_MODELS = process.env.FREE_PLAN_GRADING_MODELS?.split(",")
+  .map((model) => model.trim())
+  .filter(Boolean) ?? [
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "dots-studio/dots-3-note-preview:free",
+  "inclusionai/ling-3.0-flash-vl",
+];
 export const TRANSCRIBE_MODEL = process.env.TRANSCRIBE_MODEL || "google/gemini-3.8-flash";
 
 export class MissingKeyError extends Error {

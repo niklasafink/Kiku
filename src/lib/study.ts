@@ -3,6 +3,9 @@ import type { Attempt } from "./types";
 /** Cards below this score on their last attempt (or never practised) count as "weak". */
 export const WEAK_BELOW = 80;
 
+/** An exam simulation draws at most this many cards, so it stays about as long as a real one. */
+export const EXAM_CARDS = 20;
+
 export function isWeak(last: Attempt | undefined): boolean {
   return !last || last.score < WEAK_BELOW;
 }

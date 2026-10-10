@@ -22,10 +22,27 @@ function userPrompt(question: string, solution: string, answer: string) {
   return `<frage>\n${question}\n</frage>\n\n<musterloesung>\n${solution}\n</musterloesung>\n\n<antwort_des_studenten>\n${answer}\n</antwort_des_studenten>`;
 }
 
+// How one model of a chain is called: models before the last one get no retries and a time limit,
+// so an exhausted or slow one hands over quickly.
+interface Call {
+  model: string;
+  maxRetries?: number;
+  abortSignal?: AbortSignal;
+  providerOptions?: { openrouter: { reasoning: { effort: "none" } } };
+}
+
+export interface GradingOptions {
+  /** Tried in order: the next one takes over when one fails, is used up or takes too long. */
+  models: readonly string[];
+  /** Off, the small models of the free plan answer in a few seconds instead of up to twenty. */
+  thinking?: boolean;
+}
+
 /** Lets the model segment the solution freely; returns null if it altered or skipped text. */
-async function gradeFreeform(question: string, solution: string, answer: string): Promise<Segment[] | null> {
+async function gradeFreeform(call: Call, question: string, solution: string, answer: string): Promise<Segment[] | null> {
   const { output } = await generateText({
-    model: openrouter()(GRADING_MODEL),
+    ...call,
+    model: openrouter()(call.model),
     system: `${RULES}
 
 Zerlege die Musterlösung in aufeinanderfolgende Abschnitte und bewerte jeden. Schneide so fein, dass jeder Abschnitt genau eine Aussage enthält: Hat der Student von einem Satz nur einen Teil genannt, trenne den genannten Teil ("correct") vom nicht genannten ("missing"), statt den ganzen Satz als "unsure" zu werten. Ein Abschnitt kann auch nur ein Begriff oder ein Teilsatz sein. Kopiere den Text jedes Abschnitts zeichengenau aus der Musterlösung. Die Abschnitte müssen in der ursprünglichen Reihenfolge stehen und zusammen die gesamte Musterlösung abdecken. Lasse nichts aus, formuliere nichts um.`,
@@ -40,11 +57,12 @@ Zerlege die Musterlösung in aufeinanderfolgende Abschnitte und bewerte jeden. S
 }
 
 /** Fallback: the server splits the solution, the model only assigns a status per index. */
-async function gradeBySentence(question: string, solution: string, answer: string): Promise<Segment[]> {
+async function gradeBySentence(call: Call, question: string, solution: string, answer: string): Promise<Segment[]> {
   const sentences = splitSentences(solution);
   const numbered = sentences.map((s, i) => `[${i}] ${s.trim()}`).join("\n");
   const { output } = await generateText({
-    model: openrouter()(GRADING_MODEL),
+    ...call,
+    model: openrouter()(call.model),
     system: `${RULES}
 
 Die Musterlösung ist bereits in nummerierte Abschnitte zerlegt. Gib für jeden Index genau eine Bewertung zurück.`,
@@ -67,19 +85,37 @@ Die Musterlösung ist bereits in nummerierte Abschnitte zerlegt. Gib für jeden 
   });
 }
 
-/** Compares an answer with the solution. Throws if the AI request fails. */
+// Generous for a model that answers in a few seconds, short enough that the student does not give up.
+const HANDOVER_MS = 15_000;
+
+async function gradeWith(call: Call, question: string, solution: string, answer: string): Promise<Segment[]> {
+  let segments: Segment[] | null = null;
+  for (let attempt = 0; attempt < 2 && !segments; attempt++) {
+    segments = await gradeFreeform(call, question, solution, answer);
+  }
+  return segments ?? (await gradeBySentence(call, question, solution, answer));
+}
+
+/** Compares an answer with the solution. Throws if the AI request fails, for a chain if its last model does. */
 export async function gradeAnswer(
   question: string,
   solution: string,
   answer: string,
+  { models, thinking = true }: GradingOptions = { models: [GRADING_MODEL] },
 ): Promise<{ segments: Segment[]; score: number }> {
   // Nothing said: no need to ask the model.
   if (!answer.trim()) return { segments: [{ text: solution, status: "missing" }], score: 0 };
 
-  let segments: Segment[] | null = null;
-  for (let attempt = 0; attempt < 2 && !segments; attempt++) {
-    segments = await gradeFreeform(question, solution, answer);
+  const base = thinking ? {} : { providerOptions: { openrouter: { reasoning: { effort: "none" as const } } } };
+  for (const model of models.slice(0, -1)) {
+    try {
+      const call = { ...base, model, maxRetries: 0, abortSignal: AbortSignal.timeout(HANDOVER_MS) };
+      const segments = await gradeWith(call, question, solution, answer);
+      return { segments, score: scoreSegments(segments) };
+    } catch (error) {
+      console.warn(`Grading with ${model} failed, trying the next model.`, error);
+    }
   }
-  segments ??= await gradeBySentence(question, solution, answer);
+  const segments = await gradeWith({ ...base, model: models[models.length - 1] }, question, solution, answer);
   return { segments, score: scoreSegments(segments) };
 }

@@ -4,11 +4,15 @@ import { z } from "zod";
 const id = z.string().min(1).max(100);
 const ms = z.number().int().nonnegative();
 
+/** Longest question or solution a card may have. */
+export const MAX_CARD_TEXT = 20_000;
+
 export const folderRow = z.object({
   id,
   parentId: id.nullable(),
   name: z.string().max(200),
   emoji: z.string().max(16),
+  examDate: ms.nullish(),
   createdAt: ms,
   updatedAt: ms,
 });
@@ -16,8 +20,8 @@ export const folderRow = z.object({
 export const cardRow = z.object({
   id,
   folderId: id,
-  question: z.string().max(20_000),
-  solution: z.string().max(20_000),
+  question: z.string().max(MAX_CARD_TEXT),
+  solution: z.string().max(MAX_CARD_TEXT),
   createdAt: ms,
   updatedAt: ms,
 });

@@ -24,7 +24,13 @@ export async function applyChanges(db: Database, userId: string, changes: Change
       .values(changes.folders.map((row) => ({ ...row, ...own })))
       .onConflictDoUpdate({
         target: folders.id,
-        set: { ...meta, parentId: sql`excluded.parent_id`, name: sql`excluded.name`, emoji: sql`excluded.emoji` },
+        set: {
+          ...meta,
+          parentId: sql`excluded.parent_id`,
+          name: sql`excluded.name`,
+          emoji: sql`excluded.emoji`,
+          examDate: sql`excluded.exam_date`,
+        },
         setWhere: ifNewer(folders, userId),
       });
   }
@@ -144,11 +150,12 @@ export async function changesSince(db: Database, userId: string, cursor: number)
     cursor: upper,
     more: full.length > 0,
     changes: {
-      folders: live(folderRows, "folders").map(({ id, parentId, name, emoji, createdAt, updatedAt }) => ({
+      folders: live(folderRows, "folders").map(({ id, parentId, name, emoji, examDate, createdAt, updatedAt }) => ({
         id,
         parentId,
         name,
         emoji,
+        examDate,
         createdAt,
         updatedAt,
       })),

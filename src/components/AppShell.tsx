@@ -63,6 +63,19 @@ function SyncStatus() {
   );
 }
 
+/** Thin strip across the top for free accounts: what Pro adds and what it costs. */
+function UpgradeBanner() {
+  return (
+    <Link
+      href="/pricing"
+      className="block bg-primary px-4 py-1.5 pt-[max(0.375rem,env(safe-area-inset-top))] text-center text-sm font-semibold text-primary-content lg:sticky lg:top-0 lg:z-50 lg:h-8 lg:truncate"
+    >
+      Genauere KI-Auswertung und bessere Spracherkennung mit Pro, für 4,99 € im Monat oder 29 € im Jahr.{" "}
+      <span className="whitespace-nowrap underline">Jetzt upgraden</span>
+    </Link>
+  );
+}
+
 export function AppShell({ serverMode, children }: { serverMode: boolean; children: ReactNode }) {
   return (
     <AccountProvider serverMode={serverMode}>
@@ -98,6 +111,7 @@ function Shell({ children }: { children: ReactNode }) {
   const folders = useFolders() ?? [];
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
+  const showBanner = account.mode === "server" && account.user?.plan === "free";
 
   if (onAuthPage || onPublicPage) return <>{children}</>;
   if (account.mode === "server" && account.status !== "signedIn") {
@@ -105,7 +119,9 @@ function Shell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="drawer lg:drawer-open">
+    <div className="flex min-h-dvh flex-col">
+    {showBanner && <UpgradeBanner />}
+    <div className="drawer flex-1 lg:drawer-open">
       <input
         id="nav-drawer"
         type="checkbox"
@@ -113,7 +129,7 @@ function Shell({ children }: { children: ReactNode }) {
         checked={open}
         onChange={(e) => setOpen(e.target.checked)}
       />
-      <div className="drawer-content flex min-h-dvh flex-col bg-base-200">
+      <div className="drawer-content flex flex-col bg-base-200">
         <header className="navbar sticky top-0 z-30 border-b-2 border-base-300 bg-base-100 pt-[env(safe-area-inset-top)] lg:hidden">
           <label htmlFor="nav-drawer" className="btn btn-ghost btn-square" aria-label="Menü öffnen">
             <Menu />
@@ -126,7 +142,8 @@ function Shell({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
-      <div className="drawer-side z-40">
+      {/* On wide screens the banner stays pinned, so the sidebar sits below it. */}
+      <div className={`drawer-side z-40 ${showBanner ? "lg:top-8 lg:h-[calc(100dvh-2rem)]" : ""}`}>
         <label htmlFor="nav-drawer" aria-label="Menü schließen" className="drawer-overlay" />
         <nav className="flex min-h-full w-64 flex-col gap-2 border-r-2 border-base-300 bg-base-100 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
           <div className="mb-2 flex items-center gap-1">
@@ -174,6 +191,7 @@ function Shell({ children }: { children: ReactNode }) {
           </ul>
         </nav>
       </div>
+    </div>
     </div>
   );
 }

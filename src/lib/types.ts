@@ -12,6 +12,8 @@ export interface Folder {
   name: string;
   emoji: string;
   createdAt: number;
+  /** Day of the exam (local midnight, ms). Applies to all cards below this folder. */
+  examDate?: number | null;
 }
 
 export interface Card {
@@ -21,6 +23,16 @@ export interface Card {
   solution: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/** A picture used in a card. Cards refer to it as ![](kiku-img:<id>). */
+export interface StoredImage {
+  id: string;
+  type: string;
+  data: ArrayBuffer;
+  createdAt: number;
+  /** 0 = the account does not have it yet. */
+  uploaded: 0 | 1;
 }
 
 export interface Attempt {
@@ -44,6 +56,8 @@ export interface StudyCardState {
   revealed: boolean;
   attempt: Attempt | null;
   previousScore: number | null;
+  /** When the card is due again after this attempt. */
+  nextDue?: number;
 }
 
 /** An unfinished study session, stored so it can be picked up again later. */

@@ -24,6 +24,7 @@ export const folders = pgTable(
     parentId: text("parent_id"),
     name: text("name").notNull(),
     emoji: text("emoji").notNull(),
+    examDate: ms("exam_date"),
   },
   (t) => [index("folders_user_rev").on(t.userId, t.rev)],
 );
@@ -53,6 +54,21 @@ export const attempts = pgTable(
   (t) => [index("attempts_user_rev").on(t.userId, t.rev), index("attempts_card").on(t.cardId)],
 );
 
+/** Pictures used in cards, uploaded one by one. They never change, so there is nothing to sync. */
+export const images = pgTable(
+  "images",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    mime: text("mime").notNull(),
+    /** Base64. Pictures are scaled down in the browser and stay small. */
+    data: text("data").notNull(),
+    size: integer("size").notNull(),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [index("images_user").on(t.userId)],
+);
+
 /** Personal access tokens for the MCP endpoint. Only a hash is stored. */
 export const apiTokens = pgTable(
   "api_tokens",
@@ -67,7 +83,10 @@ export const apiTokens = pgTable(
   (t) => [index("api_tokens_user").on(t.userId)],
 );
 
-/** Daily counters of the public demo on the homepage. The id is a hash, no IP address is stored. */
+/**
+ * Daily counters: the public demo on the homepage (the id is a hash, no IP address is stored)
+ * and AI card generation per account.
+ */
 export const demoUsage = pgTable("demo_usage", {
   id: text("id").primaryKey(),
   day: text("day").notNull(),

@@ -7,7 +7,18 @@ import * as library from "@/server/library";
 import { applyChanges, changesSince } from "@/server/sync";
 import { createTestDb } from "@/server/testDb";
 import { db } from "./db";
-import { addAttempt, createCard, createFolder, deleteCard, deleteFolderRecursive, updateCard } from "./repo";
+import {
+  addAttempt,
+  createCard,
+  createCards,
+  createFolder,
+  deleteCard,
+  deleteFolderRecursive,
+  exportAll,
+  importAll,
+  setExamDate,
+  updateCard,
+} from "./repo";
 import { bindToUser, pendingChanges, runSync, wipeLocal } from "./sync";
 import { syncRequest } from "./syncProtocol";
 
@@ -57,6 +68,47 @@ describe("device sync", () => {
     expect((await db.attempts.toArray())[0].segments[0].note).toBe("genannt");
     // Data that came from the server is not a local change.
     expect(await pendingChanges()).toBe(0);
+  });
+
+  it("carries a folder's exam date to other devices", async () => {
+    const folder = await createFolder("Bio", "🧬", null);
+    await setExamDate(folder.id, 1_800_000_000_000);
+    await runSync(as("u1"));
+    await freshDevice();
+    expect((await db.folders.get(folder.id))?.examDate).toBe(1_800_000_000_000);
+
+    await setExamDate(folder.id, null);
+    await runSync(as("u1"));
+    await freshDevice();
+    expect((await db.folders.get(folder.id))?.examDate ?? null).toBeNull();
+  });
+
+  it("imports cards in batches, in order, and reports progress", async () => {
+    const folder = await createFolder("Bio", "🧬", null);
+    const rows = Array.from({ length: 2300 }, (_, i) => ({ question: `q${i}`, solution: `s${i}` }));
+    const progress: number[] = [];
+    await createCards(folder.id, rows, (done) => progress.push(done));
+    expect(progress).toEqual([2000, 2300]);
+    const stored = (await db.cards.toArray()).sort((a, b) => a.createdAt - b.createdAt);
+    expect(stored).toHaveLength(2300);
+    expect(stored[2299].question).toBe("q2299");
+    expect(new Set(stored.map((c) => c.createdAt)).size).toBe(2300);
+  });
+
+  it("keeps pictures in a backup and restores them", async () => {
+    const data = new Uint8Array([1, 2, 3, 250, 0, 9]).buffer;
+    await db.images.add({ id: "image-0001", type: "image/webp", data, createdAt: 1, uploaded: 1 });
+    const backup = JSON.parse(JSON.stringify(await exportAll()));
+    await wipeLocal();
+    expect(await db.images.count()).toBe(0);
+
+    await importAll(backup);
+    const restored = await db.images.get("image-0001");
+    expect([...new Uint8Array(restored!.data)]).toEqual([1, 2, 3, 250, 0, 9]);
+    // The account of this device may not have it yet.
+    expect(restored!.uploaded).toBe(0);
+    // A backup from before pictures existed still loads.
+    await importAll({ version: 1, folders: [], cards: [], attempts: [] });
   });
 
   it("does nothing when there is nothing to do", async () => {

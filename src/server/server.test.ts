@@ -72,6 +72,14 @@ describe("sync", () => {
     expect(second.folders).toEqual([]);
   });
 
+  it("syncs a folder's exam date, including clearing it", async () => {
+    await applyChanges(db, "u1", { ...empty, folders: [{ ...folder("f1", 10), examDate: 1_800_000_000_000 }] });
+    expect((await pullAll("u1")).folders[0].examDate).toBe(1_800_000_000_000);
+
+    await applyChanges(db, "u1", { ...empty, folders: [{ ...folder("f1", 20), examDate: null }] });
+    expect((await pullAll("u1")).folders[0].examDate).toBeNull();
+  });
+
   it("keeps the newer edit when two devices change the same card", async () => {
     await applyChanges(db, "u1", { ...empty, cards: [card("c1", "f1", 100, "new")] });
     await applyChanges(db, "u1", { ...empty, cards: [card("c1", "f1", 50, "stale")] });
