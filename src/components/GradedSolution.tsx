@@ -102,7 +102,7 @@ export function GradeLegend({ segments, className = "" }: { segments: Segment[];
     <ul className={`flex flex-wrap gap-x-3 gap-y-1 px-1 text-xs ${className}`}>
       {shown.map((status) => (
         <li key={status}>
-          <span className={`seg seg-${status}`}>{LABEL[status]}</span>
+          <span className={`seg seg-${status} whitespace-nowrap`}>{LABEL[status]}</span>
         </li>
       ))}
     </ul>

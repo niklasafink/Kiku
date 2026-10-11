@@ -2,6 +2,8 @@
 // that the AI reads. Kept apart from the canvas component so an answer written on one card
 // can be read later (e.g. when an exam is handed in) without that card being on screen.
 
+import { getStroke } from "perfect-freehand";
+
 export interface InkPoint {
   x: number;
   y: number;
@@ -15,38 +17,71 @@ export interface Stroke {
   erase?: boolean;
 }
 
-const PEN_WIDTH = 2.4;
+/** Width of the line at medium pressure; pressing harder or lighter makes it up to half as wide again or less. */
+const PEN_WIDTH = 3;
 const ERASER_WIDTH = 22;
 
-const widthAt = (point: InkPoint) => PEN_WIDTH * (0.55 + point.pressure * 0.9);
+/**
+ * The shape of a pen stroke: an outline around the smoothed line, as wide as the pressure at
+ * each point. `complete` is false while the pen is still down, so the tip follows the pen.
+ */
+export function strokeOutline(points: InkPoint[], complete = true): number[][] {
+  return getStroke(points, {
+    size: PEN_WIDTH,
+    thinning: 0.5,
+    smoothing: 0.5,
+    // Low, because more of it makes the line trail behind the pen.
+    streamline: 0.3,
+    simulatePressure: false,
+    last: complete,
+  });
+}
 
-/** Paints one stroke; `from` paints only its newest part while it is being drawn. */
+function fillOutline(context: CanvasRenderingContext2D, outline: number[][]): void {
+  if (outline.length < 2) return;
+  context.beginPath();
+  context.moveTo(outline[0][0], outline[0][1]);
+  // Curves through the midpoints, so the edge of the line is round and not a polygon.
+  for (let i = 0; i < outline.length; i++) {
+    const a = outline[i];
+    const b = outline[(i + 1) % outline.length];
+    context.quadraticCurveTo(a[0], a[1], (a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+  }
+  context.closePath();
+  context.fill();
+}
+
+/** Paints pen points as one smooth line; with `complete` false as a stroke that is still being drawn. */
+export function drawInk(context: CanvasRenderingContext2D, points: InkPoint[], color: string, complete = true): void {
+  if (points.length === 0) return;
+  context.save();
+  context.fillStyle = color;
+  fillOutline(context, strokeOutline(points, complete));
+  context.restore();
+}
+
+/** Paints one stroke; `from` paints only the newest part of an erasing stroke while it is being drawn. */
 export function drawStroke(context: CanvasRenderingContext2D, stroke: Stroke, color: string, from = 0): void {
   const { points } = stroke;
   if (points.length === 0) return;
+  if (!stroke.erase) {
+    drawInk(context, points, color);
+    return;
+  }
   context.save();
   context.lineCap = "round";
   context.lineJoin = "round";
-  context.strokeStyle = color;
-  context.fillStyle = color;
-  if (stroke.erase) context.globalCompositeOperation = "destination-out";
-
+  context.lineWidth = ERASER_WIDTH;
+  context.globalCompositeOperation = "destination-out";
   if (points.length === 1) {
-    const radius = (stroke.erase ? ERASER_WIDTH : widthAt(points[0])) / 2;
     context.beginPath();
-    context.arc(points[0].x, points[0].y, radius, 0, Math.PI * 2);
+    context.arc(points[0].x, points[0].y, ERASER_WIDTH / 2, 0, Math.PI * 2);
     context.fill();
   }
-  // Segment by segment, because the width follows the pressure.
-  for (let i = Math.max(1, from); i < points.length; i++) {
-    const a = points[i - 1];
-    const b = points[i];
-    context.lineWidth = stroke.erase ? ERASER_WIDTH : (widthAt(a) + widthAt(b)) / 2;
-    context.beginPath();
-    context.moveTo(a.x, a.y);
-    context.lineTo(b.x, b.y);
-    context.stroke();
-  }
+  context.beginPath();
+  context.moveTo(points[Math.max(1, from) - 1].x, points[Math.max(1, from) - 1].y);
+  for (let i = Math.max(1, from); i < points.length; i++) context.lineTo(points[i].x, points[i].y);
+  context.stroke();
   context.restore();
 }
 

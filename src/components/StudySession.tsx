@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CloudOff, Eye, GraduationCap, Headphones, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import { ArrowLeft, ArrowRight, Check, CloudOff, Eye, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, X } from "lucide-react";
 import { useAccount } from "@/components/Account";
 import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
 import { Handwriting } from "@/components/Handwriting";
@@ -29,13 +29,19 @@ const EMPTY: CardState = { answer: "", usedVoice: false, revealed: false, attemp
 
 const RADIAL = { success: "text-success", warning: "text-warning", error: "text-error" } as const;
 const LABEL = "text-xs font-extrabold tracking-wide uppercase opacity-60";
-/** How the answer is given: spoken or typed, or written by hand. The choice is remembered on the device. */
-type AnswerMode = "speak" | "pen";
+/** How the answer is given: spoken, typed or written by hand. The choice is remembered on the device. */
+type AnswerMode = "speak" | "type" | "pen";
+const MODES = [
+  { mode: "speak", label: "Sprechen", Icon: Mic },
+  { mode: "type", label: "Tippen", Icon: Keyboard },
+  { mode: "pen", label: "Handschrift", Icon: PenLine },
+] as const;
 const MODE_KEY = "kiku-answer-mode";
 
 function storedMode(): AnswerMode {
   try {
-    return localStorage.getItem(MODE_KEY) === "pen" ? "pen" : "speak";
+    const stored = localStorage.getItem(MODE_KEY);
+    return stored === "pen" || stored === "type" ? stored : "speak";
   } catch {
     return "speak";
   }
@@ -50,6 +56,19 @@ const SHOW_REMAINING_BELOW = 25;
 
 /** Answers graded at the same time when an exam is handed in. */
 const EXAM_PARALLEL = 3;
+
+/** A text field that grows with what is written in it, so a long answer stays in view as a whole. */
+function GrowingTextarea(props: ComponentProps<"textarea">) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const field = ref.current;
+    // Browsers that size the field themselves (see the class) do it without a jump of the page.
+    if (!field || CSS.supports("field-sizing", "content")) return;
+    field.style.height = "auto";
+    field.style.height = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`;
+  }, [props.value]);
+  return <textarea ref={ref} {...props} className={`${props.className ?? ""} resize-none [field-sizing:content]`} />;
+}
 
 function praise(score: number): string {
   if (score >= 90) return "Stark, fast alles dabei!";
@@ -618,6 +637,25 @@ export function StudySession({
                 <h2 className={LABEL}>Deine Antwort</h2>
                 <p className="mt-1.5 whitespace-pre-wrap">{attempt.answerText}</p>
               </section>
+              {state.explanation ? (
+                <section className="tile pop-in p-4">
+                  <h2 className={`mb-1.5 flex items-center gap-1.5 ${LABEL}`}>
+                    <Lightbulb className="size-3.5" aria-hidden /> Erklärung
+                  </h2>
+                  <RichText text={state.explanation} className="text-sm leading-relaxed" />
+                </section>
+              ) : (
+                attempt.score < 100 && (
+                  <button
+                    className="btn btn-sm self-start bg-base-100"
+                    onClick={() => void explain(card)}
+                    disabled={explainingId !== null}
+                  >
+                    {explainingId === card.id ? <span className="loading loading-spinner loading-xs" /> : <Lightbulb className="size-4" />}
+                    Was hat gefehlt, und wie merke ich es mir?
+                  </button>
+                )
+              )}
             </>
           )}
         </div>
@@ -629,25 +667,6 @@ export function StudySession({
             <section className="tile pop-in p-4">
               <h2 className={`mb-1.5 ${LABEL}`}>Lösung</h2>
               <GradedSolution segments={attempt.segments} solution={attempt.solutionSnapshot} />
-              {state.explanation ? (
-                <div className="pop-in mt-4 rounded-field bg-base-200 px-4 py-3">
-                  <h3 className={`mb-1.5 flex items-center gap-1.5 ${LABEL}`}>
-                    <Lightbulb className="size-3.5" aria-hidden /> Erklärung
-                  </h3>
-                  <RichText text={state.explanation} className="text-sm leading-relaxed" />
-                </div>
-              ) : (
-                attempt.score < 100 && (
-                  <button
-                    className="btn btn-sm mt-4 bg-base-200"
-                    onClick={() => void explain(card)}
-                    disabled={explainingId !== null}
-                  >
-                    {explainingId === card.id ? <span className="loading loading-spinner loading-xs" /> : <Lightbulb className="size-4" />}
-                    Was hat gefehlt, und wie merke ich es mir?
-                  </button>
-                )
-              )}
             </section>
             <GradeLegend segments={attempt.segments} />
             </>
@@ -673,22 +692,17 @@ export function StudySession({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className={LABEL}>Deine Antwort</h2>
                 <div className="join" role="group" aria-label="Art der Antwort">
-                  <button
-                    className={`btn btn-sm join-item ${mode === "speak" ? "btn-primary" : "bg-base-100"}`}
-                    aria-pressed={mode === "speak"}
-                    onClick={() => chooseMode("speak")}
-                    disabled={grading}
-                  >
-                    <Mic className="size-4" /> Sprechen &amp; Tippen
-                  </button>
-                  <button
-                    className={`btn btn-sm join-item ${mode === "pen" ? "btn-primary" : "bg-base-100"}`}
-                    aria-pressed={mode === "pen"}
-                    onClick={() => chooseMode("pen")}
-                    disabled={grading}
-                  >
-                    <PenLine className="size-4" /> Handschrift
-                  </button>
+                  {MODES.map(({ mode: option, label, Icon }) => (
+                    <button
+                      key={option}
+                      className={`btn btn-sm join-item ${mode === option ? "btn-primary" : "bg-base-100"}`}
+                      aria-pressed={mode === option}
+                      onClick={() => chooseMode(option)}
+                      disabled={grading}
+                    >
+                      <Icon className="size-4" /> {label}
+                    </button>
+                  ))}
                 </div>
               </div>
               {mode === "pen" ? (
@@ -700,7 +714,7 @@ export function StudySession({
                       : "Bei der Abgabe liest die KI deine Handschrift."}
                   </p>
                 </>
-              ) : (
+              ) : mode === "speak" ? (
                 <>
                   <Recorder
                     browser={browserDictation}
@@ -721,15 +735,14 @@ export function StudySession({
                       ausgewertet; mit dem roten Knopf geht es sofort weiter.
                     </p>
                   )}
-                  <div className="divider my-0 text-xs font-bold opacity-60">oder tippen</div>
                 </>
-              )}
-              {/* Also shown while writing once there is text, e.g. handwriting that was read before a failed grading. */}
-              {(mode === "speak" || state.answer) && (
+              ) : null}
+              {/* Also shown otherwise once there is text to correct: what was spoken, or handwriting that was read before a failed grading. */}
+              {(mode === "type" || state.answer) && (
                 <label>
                   <span className="sr-only">Deine Antwort</span>
-                  <textarea
-                    className="textarea min-h-36 w-full"
+                  <GrowingTextarea
+                    className="textarea min-h-52 w-full"
                     value={state.answer}
                     onChange={(e) => patch(card.id, { answer: e.target.value })}
                     onKeyDown={(e) => {
