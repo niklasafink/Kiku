@@ -23,10 +23,14 @@ function describeFailure(failure: unknown, signUp: boolean): string {
   return message || (signUp ? "Das Konto konnte nicht angelegt werden." : "Anmeldung fehlgeschlagen.");
 }
 
-/** Sign-in and sign-up share one form; sign-up only adds the name field. */
-export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
+/**
+ * Sign-in and sign-up share one form; sign-up only adds the name field.
+ * `next` is where the shell continues once signed in, kept when switching between the two.
+ */
+export function AuthForm({ mode, next }: { mode: "sign-in" | "sign-up"; next?: string | null }) {
   const account = useAccount();
   const signUp = mode === "sign-up";
+  const query = next ? `?next=${encodeURIComponent(next)}` : "";
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -48,7 +52,7 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         return;
       }
 
-      // Once the session is known the shell moves on to the library by itself.
+      // Once the session is known the shell moves on by itself: to `next`, or to the library.
       const signedIn = account.mode === "server" ? await account.refresh() : null;
       if (signedIn) return;
 
@@ -137,7 +141,7 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         )}
         <p className="text-center text-sm">
           {signUp ? "Schon ein Konto? " : "Noch kein Konto? "}
-          <Link href={signUp ? "/auth/sign-in" : "/auth/sign-up"} className="link font-bold">
+          <Link href={`${signUp ? "/auth/sign-in" : "/auth/sign-up"}${query}`} className="link font-bold">
             {signUp ? "Anmelden" : "Konto anlegen"}
           </Link>
         </p>

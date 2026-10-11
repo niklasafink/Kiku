@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { notifySignUp } from "./notify";
+import { notifyPurchaseRequest, notifySignUp } from "./notify";
 
 const signUp = (user: unknown) => Response.json({ token: null, user });
 const fetchMock = vi.fn();
@@ -39,5 +39,13 @@ describe("notifySignUp", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     fetchMock.mockRejectedValue(new Error("offline"));
     await expect(notifySignUp(signUp({ email: "anna@example.com" }))).resolves.toBeUndefined();
+  });
+});
+
+describe("notifyPurchaseRequest", () => {
+  it("sends who wants to buy what", async () => {
+    await notifyPurchaseRequest({ email: "anna@example.com", name: "Anna" }, "pro-yearly");
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body).text).toBe("Kaufanfrage bei Kiku\nAnna · anna@example.com\nPro, 29 € im Jahr");
   });
 });

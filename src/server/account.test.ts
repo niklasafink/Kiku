@@ -3,8 +3,9 @@ import type { ChangeSet } from "@/lib/syncProtocol";
 import { deleteUserData } from "./account";
 import type { Database } from "./db";
 import { putImage } from "./images";
+import { requestPurchase } from "./purchase";
 import { takeQuota } from "./quota";
-import { apiTokens, attempts, cards, demoUsage, folders, images, shares } from "./schema";
+import { apiTokens, attempts, cards, demoUsage, folders, images, purchaseRequests, shares } from "./schema";
 import { createShare } from "./shares";
 import { applyChanges } from "./sync";
 import { createTestDb } from "./testDb";
@@ -28,6 +29,7 @@ beforeEach(async () => {
     await createShare(db, user, `f-${user}`);
     await createToken(db, user, "Claude");
     await takeQuota(db, "ai", user, "free", "2026-10");
+    await requestPurchase(db, { id: user, email: `${user}@example.com`, name: user }, "lifetime");
   }
 });
 
@@ -40,5 +42,6 @@ describe("account deletion", () => {
       expect(await count(table)).toEqual(["u2"]);
     }
     expect((await db.select({ id: demoUsage.id }).from(demoUsage)).map((row) => row.id)).toEqual(["ai:u2:2026-10"]);
+    expect((await db.select({ userId: purchaseRequests.userId }).from(purchaseRequests)).map((row) => row.userId)).toEqual(["u2"]);
   });
 });

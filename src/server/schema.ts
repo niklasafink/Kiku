@@ -1,4 +1,5 @@
 import { bigint, index, integer, jsonb, pgSequence, pgTable, text } from "drizzle-orm/pg-core";
+import type { Offer } from "@/lib/offers";
 import type { StudyPlan } from "@/lib/studyPlan";
 import type { InputMode, Segment } from "@/lib/types";
 
@@ -113,4 +114,16 @@ export const demoUsage = pgTable("demo_usage", {
   id: text("id").primaryKey(),
   day: text("day").notNull(),
   count: integer("count").notNull(),
+});
+
+/**
+ * Who asked to buy which offer, one row per account. There is no checkout yet: the operator
+ * writes to the address noted here.
+ */
+export const purchaseRequests = pgTable("purchase_requests", {
+  userId: text("user_id").primaryKey(),
+  email: text("email").notNull(),
+  name: text("name").notNull(),
+  offer: text("offer").$type<Offer>().notNull(),
+  createdAt: ms("created_at").notNull(),
 });

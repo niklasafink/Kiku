@@ -9,6 +9,7 @@ import { AccountProvider, useAccount, useSyncState } from "@/components/Account"
 import { useAttemptLog, useFolders } from "@/lib/hooks";
 import { db } from "@/lib/db";
 import { cleanupImages } from "@/lib/images";
+import { returnPath } from "@/lib/offers";
 import { enableOffline } from "@/lib/offline";
 import { gradePendingAnswers } from "@/lib/pendingGrades";
 import { parseOpenFolders, setFoldersOpen, setSidebarCollapsed, useOpenFolders, useSidebarCollapsed } from "@/lib/settings";
@@ -197,6 +198,8 @@ function Shell({ children }: { children: ReactNode }) {
   // "/home" is the same homepage for people who are signed in.
   const onPublicPage =
     pathname === "/pricing" ||
+    // Sends visitors to the sign-up by itself, see its page.
+    pathname === "/kaufen" ||
     pathname === "/impressum" ||
     pathname === "/datenschutz" ||
     pathname === "/agb" ||
@@ -209,7 +212,13 @@ function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (signedOut && !onAuthPage && !onPublicPage) router.replace("/auth/sign-in");
     // Nothing to sign in to once you are in, or when the app runs without accounts.
-    if ((signedIn || account.mode === "local") && onAuthPage) router.replace("/");
+    // Whoever came to sign in on the way somewhere (?next=) continues there.
+    if ((signedIn || account.mode === "local") && onAuthPage) {
+      const next = returnPath(new URLSearchParams(window.location.search).get("next"));
+      // A full load: the router may still hold what that page answered before the sign-in.
+      if (next) window.location.replace(next);
+      else router.replace("/");
+    }
   }, [signedOut, signedIn, account.mode, onAuthPage, onPublicPage, router]);
 
   // Without an account no sync runs, which is what tidies up pictures otherwise.

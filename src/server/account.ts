@@ -1,11 +1,11 @@
 // Removing everything an account stored, and then the account itself.
 import { eq, like, sql } from "drizzle-orm";
 import type { Database } from "./db";
-import { apiTokens, attempts, cards, demoUsage, folders, images, shares, studyPlans } from "./schema";
+import { apiTokens, attempts, cards, demoUsage, folders, images, purchaseRequests, shares, studyPlans } from "./schema";
 
 /**
- * Deletes the user's rows in every table: library, pictures, shared links, MCP tokens, the study plan and the
- * usage counters. Rows are really removed here, not marked: no device will sync this account again.
+ * Deletes the user's rows in every table: library, pictures, shared links, MCP tokens, the study plan, a purchase
+ * request and the usage counters. Rows are really removed here, not marked: no device will sync this account again.
  */
 export async function deleteUserData(db: Database, userId: string): Promise<void> {
   await db.delete(shares).where(eq(shares.userId, userId));
@@ -15,6 +15,7 @@ export async function deleteUserData(db: Database, userId: string): Promise<void
   await db.delete(folders).where(eq(folders.userId, userId));
   await db.delete(images).where(eq(images.userId, userId));
   await db.delete(studyPlans).where(eq(studyPlans.userId, userId));
+  await db.delete(purchaseRequests).where(eq(purchaseRequests.userId, userId));
   // Counters are keyed "<kind>:<userId>:<period>", see quota.ts.
   await db.delete(demoUsage).where(like(demoUsage.id, `%:${userId}:%`));
 }

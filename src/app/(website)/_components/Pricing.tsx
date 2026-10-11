@@ -6,6 +6,7 @@ import { ArrowRight, Check, Minus, Plus } from "lucide-react";
 import { GitHubIcon } from "./GitHubIcon";
 import { HeroGlow } from "./HeroGlow";
 import { CARD, GITHUB_URL, H2, LEAD, SCREEN, WRAP } from "./shared";
+import { purchasePath } from "@/lib/offers";
 
 // Like SCREEN, with less padding so the whole comparison fits on one laptop screen.
 const PRICING_SCREEN = `${WRAP} flex min-h-[calc(100svh-84px)] flex-col justify-center py-6 lg:py-8`;
@@ -20,7 +21,8 @@ interface Plan {
   price: Record<Billing, string>;
   unit: Record<Billing, string>;
   note?: Record<Billing, string>;
-  cta: { label: string; href: string; external?: boolean };
+  /** Where the button leads; for Pro that depends on the billing period chosen. */
+  cta: { label: string; href: string | Record<Billing, string>; external?: boolean };
   highlighted?: boolean;
 }
 
@@ -53,7 +55,10 @@ const PLANS: Plan[] = [
     price: { monthly: "4,99 €", yearly: "29 €" },
     unit: { monthly: "pro Monat", yearly: "pro Jahr" },
     note: { monthly: "Monatlich kündbar", yearly: "2,42 € im Monat statt 4,99 €" },
-    cta: { label: "Pro starten", href: "/auth/sign-up" },
+    cta: {
+      label: "Pro starten",
+      href: { monthly: purchasePath("pro-monthly"), yearly: purchasePath("pro-yearly") },
+    },
     highlighted: true,
   },
   {
@@ -63,7 +68,7 @@ const PLANS: Plan[] = [
     price: { monthly: "49 €", yearly: "49 €" },
     unit: { monthly: "einmalig", yearly: "einmalig" },
     note: { monthly: "Keine Verlängerung", yearly: "Keine Verlängerung" },
-    cta: { label: "Einmal kaufen", href: "/auth/sign-up" },
+    cta: { label: "Einmal kaufen", href: purchasePath("lifetime") },
   },
 ];
 
@@ -196,6 +201,7 @@ function PlanHead({ plan, billing, compact }: { plan: Plan; billing: Billing; co
       ? "bg-accent text-accent-content hover:brightness-105"
       : "border border-base-300 bg-base-100 hover:bg-base-200"
   }`;
+  const href = typeof plan.cta.href === "string" ? plan.cta.href : plan.cta.href[billing];
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2">
@@ -212,12 +218,12 @@ function PlanHead({ plan, billing, compact }: { plan: Plan; billing: Billing; co
       {!compact && <p className="mt-2 text-sm text-pretty opacity-80">{plan.tagline}</p>}
       <div className="mt-auto pt-4">
         {plan.cta.external ? (
-          <a href={plan.cta.href} target="_blank" rel="noreferrer" className={`${button} w-full`}>
+          <a href={href} target="_blank" rel="noreferrer" className={`${button} w-full`}>
             <GitHubIcon className="size-4" />
             {plan.cta.label}
           </a>
         ) : (
-          <Link href={plan.cta.href} className={`${button} w-full`}>
+          <Link href={href} className={`${button} w-full`}>
             {plan.cta.label}
             <ArrowRight className="size-4" aria-hidden />
           </Link>
