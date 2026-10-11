@@ -32,8 +32,8 @@ describe("grading answers given offline", () => {
 
     expect(await gradePendingAnswers()).toEqual({ graded: 2, left: 0 });
     expect(calls).toEqual([
-      { question: "Hauptstadt?", solution: "Paris ist die Hauptstadt.", answer: "Paris" },
-      { question: "Hauptstadt?", solution: "Paris ist die Hauptstadt.", answer: "Paris" },
+      { question: "Hauptstadt?", solution: "Paris ist die Hauptstadt.", answer: "Paris", context: "" },
+      { question: "Hauptstadt?", solution: "Paris ist die Hauptstadt.", answer: "Paris", context: "" },
     ]);
     const attempts = await db.attempts.orderBy("createdAt").toArray();
     expect(attempts.map((a) => [a.cardId, a.createdAt, a.score])).toEqual([
