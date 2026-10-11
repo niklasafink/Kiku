@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Po
 import { Eraser, Hand, PenLine, Trash2, Undo2 } from "lucide-react";
 import { drawInk, drawStroke, drawStrokes, hasInk, inkBottom, type InkPoint, type Stroke } from "@/lib/ink";
 
-const START_HEIGHT = 520;
-const GROW_BY = 360;
+/** The sheet is long from the start, some screens of paper; the window on it scrolls. */
+const START_HEIGHT = 1600;
+const GROW_BY = 800;
 /** Room kept free below the writing; the sheet grows when less is left. */
-const MARGIN = 140;
+const MARGIN = 300;
 const LINE_GAP = 38;
 /** Ink on the paper: always dark on white, whatever the theme, like paper in GoodNotes. */
 const INK = "#1b1b24";
@@ -26,8 +27,6 @@ interface Drawing {
   stroke: Stroke;
   pointerId: number;
   type: string;
-  /** Where the browser expects the pen next; painted ahead of it, never kept. */
-  predicted: InkPoint[];
   /** When the pen was last heard from. */
   time: number;
   /** The part of the sheet the stroke was painted on while it is drawn. */
@@ -38,6 +37,19 @@ interface Drawing {
 const knowsStylus = () => typeof Touch !== "undefined" && "touchType" in Touch.prototype;
 const isStylus = (touch: Touch) => (touch as Touch & { touchType?: string }).touchType === "stylus";
 const never = () => () => {};
+
+/**
+ * Safari knows no pressure for the first samples of a stroke. They take that of the first sample
+ * that has one, or `fallback` if none came; otherwise every stroke would begin with a blot.
+ */
+function settlePressure(points: InkPoint[], fallback?: number) {
+  const pressure = points.find((point) => point.pressure > 0)?.pressure ?? fallback;
+  if (pressure === undefined) return;
+  for (const point of points) {
+    if (point.pressure > 0) break;
+    point.pressure = pressure;
+  }
+}
 
 /** Keeps the pointer's events on the sheet while it moves; refused for pointers that are already gone. */
 function capture(element: HTMLElement, pointerId: number) {
@@ -58,9 +70,9 @@ function scrollerOf(element: HTMLElement): Element | Window {
 }
 
 /**
- * A sheet of white paper to write on with Apple Pencil or another stylus. The pen writes, a
- * finger scrolls the page (so you can move up and down while writing), and a resting palm
- * does nothing. The mouse always writes; "Finger schreibt" lets a finger write too, for
+ * A long sheet of white paper to write on with Apple Pencil or another stylus, seen through a
+ * window of fixed height. The pen writes, a finger scrolls the sheet in its window (the page
+ * around it stays put), and a resting palm does nothing. The mouse always writes; "Finger schreibt" lets a finger write too, for
  * tablets without a pen.
  *
  * On iPad the browser scrolls for the finger as it does anywhere else, and only the pen is
@@ -82,6 +94,7 @@ export function Handwriting({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
+  const windowRef = useRef<HTMLDivElement>(null);
   const [tool, setTool] = useState<"pen" | "eraser">("pen");
   const [fingerWrites, setFingerWrites] = useState(false);
   const [height, setHeight] = useState(() => Math.max(START_HEIGHT, inkBottom(strokes) + MARGIN));
@@ -192,7 +205,8 @@ export function Handwriting({
     return samples.map((sample) => ({
       x: sample.clientX - rect.left,
       y: sample.clientY - rect.top,
-      pressure: sample.pointerType === "pen" && sample.pressure > 0 ? sample.pressure : 0.5,
+      // 0 from a pen means "not known yet", see settlePressure.
+      pressure: sample.pointerType === "pen" ? sample.pressure : 0.5,
     }));
   }
 
@@ -215,7 +229,7 @@ export function Handwriting({
       const drawing = current.current;
       if (!drawing || drawing.stroke.erase) return;
       wipeLive(drawing);
-      const points = [...drawing.stroke.points, ...drawing.predicted];
+      const { points } = drawing.stroke;
       for (const point of points) {
         drawing.box.left = Math.min(drawing.box.left, point.x);
         drawing.box.top = Math.min(drawing.box.top, point.y);
@@ -230,6 +244,7 @@ export function Handwriting({
   function finish(drawing: Drawing) {
     current.current = null;
     cancelAnimationFrame(frame.current);
+    settlePressure(drawing.stroke.points, 0.5);
     const next = [...strokesRef.current, drawing.stroke];
     if (!drawing.stroke.erase) {
       wipeLive(drawing);
@@ -293,7 +308,6 @@ export function Handwriting({
       stroke,
       pointerId: event.pointerId,
       type,
-      predicted: [],
       time: event.timeStamp,
       box: { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
     };
@@ -327,7 +341,7 @@ export function Handwriting({
       drawStroke(contextOf(event.currentTarget), drawing.stroke, INK, from);
       return;
     }
-    drawing.predicted = toPoints(event, event.nativeEvent.getPredictedEvents?.() ?? []);
+    settlePressure(drawing.stroke.points);
     paintLive();
   }
 
@@ -397,14 +411,19 @@ export function Handwriting({
           onClick={() => {
             onChange([]);
             setHeight(START_HEIGHT);
+            windowRef.current?.scrollTo(0, 0);
           }}
           disabled={disabled || strokes.length === 0}
         >
           <Trash2 className="size-4" /> Leeren
         </button>
       </div>
-      {/* The frame is on the box around the layers, so both lie exactly on each other. */}
-      <div className="relative overflow-hidden rounded-field border-2 border-base-300 bg-white">
+      {/* A window on the long sheet: it scrolls in here, the page around it stays where it is. */}
+      <div
+        ref={windowRef}
+        className="h-[calc(100dvh-21rem)] min-h-80 overflow-y-auto overscroll-contain rounded-field border-2 border-base-300 bg-white"
+      >
+      <div className="relative" style={{ height }}>
         <canvas
           ref={canvasRef}
           role="img"
@@ -424,12 +443,13 @@ export function Handwriting({
         />
         <canvas ref={liveRef} aria-hidden className="pointer-events-none absolute inset-0 block w-full" style={{ height }} />
         {empty && (
-          <p className="pointer-events-none absolute inset-x-0 top-1/4 px-4 text-center text-sm text-neutral/50">
-            Schreib mit dem Apple Pencil auf das Blatt. Mit einem Finger scrollst du.
+          <p className="pointer-events-none absolute inset-x-0 top-20 px-4 text-center text-sm text-neutral/50">
+            Schreib mit dem Apple Pencil auf das Blatt. Mit einem Finger scrollst du es weiter.
             <br />
             Wenn du fertig bist, tippe auf „Fertig“: dann liest die KI deine Handschrift.
           </p>
         )}
+      </div>
       </div>
     </div>
   );
