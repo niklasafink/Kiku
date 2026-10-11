@@ -44,7 +44,7 @@ function AccountSection() {
       <h2 className="text-lg font-extrabold">Konto</h2>
       <p>
         Angemeldet als <span className="font-bold">{account.user.email}</span>
-        {account.user.plan === "paid" ? " (Pro)" : " (kostenlos)"}
+        {{ free: " (kostenlos)", paid: " (Pro)", unlimited: " (unbegrenzt)" }[account.user.plan]}
       </p>
       {account.user.ai && (
         <p className="text-sm opacity-80">

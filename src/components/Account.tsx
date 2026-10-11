@@ -8,9 +8,11 @@ export interface AccountUser {
   id: string;
   email: string;
   name: string;
-  plan: "free" | "paid";
+  plan: "free" | "paid" | "unlimited";
   /** Gradings and explanations left this month. Missing while the app is offline. */
   ai?: { remaining: number; limit: number };
+  /** Whether a study plan is stored for the account. */
+  hasStudyPlan?: boolean;
 }
 
 type Account =

@@ -17,6 +17,7 @@ import {
   GraduationCap,
   History,
   ListChecks,
+  MessagesSquare,
   Mic,
   MoreHorizontal,
   Pencil,
@@ -319,6 +320,16 @@ export function FolderView({ folderId }: { folderId: string | null }) {
             >
               <GraduationCap className="size-4" />
               Prüfung simulieren
+            </Link>
+          )}
+          {folder && scope.length > 0 && (
+            <Link
+              href={`/f/${folder.id}/tandem`}
+              className="btn btn-chunky bg-base-100"
+              title="Sprich mit der KI über die Karten dieses Ordners: abfragen lassen, erklären, nachfragen"
+            >
+              <MessagesSquare className="size-4" />
+              Tandem
             </Link>
           )}
           {folder && (

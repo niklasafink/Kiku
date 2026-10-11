@@ -39,6 +39,7 @@ it works on tablets, phones, Mac and Windows alike. On iPad you can add it to th
 - Handwritten answers: write with Apple Pencil, another stylus or a finger; the AI reads the writing and grades it
 - Hands-free studying: the question is read aloud, you answer, the result is announced, the next card follows
 - After grading, the AI explains on request what was missing and how to remember it
+- Study tandem: talk through the cards of a folder with an AI study partner that speaks with a natural voice. It quizzes you and helps you find the answer, lets you explain a topic to it, or answers your questions
 - Tags and a star to mark cards across folders, to filter by and to study
 - Statistics: streak, answers per day, average score and the repetitions coming up
 - Share a folder by link; others can read it and copy it into their own library
@@ -67,9 +68,12 @@ Open http://localhost:3000.
 | `OPENROUTER_API_KEY` | yes | | Key from [openrouter.ai/keys](https://openrouter.ai/keys) |
 | `GRADING_MODEL` | no | `openai/gpt-6-luna` | Model that compares answer and solution |
 | `TRANSCRIBE_MODEL` | no | `google/gemini-3.8-flash` | Model that transcribes recordings; must accept audio input |
+| `TANDEM_MODEL` | no | the grading model | Model that talks in the study tandem |
+| `SPEECH_MODEL` | no | `elevenlabs/eleven-v4-turbo` | Text-to-speech model on OpenRouter that voices the tandem |
 | `PAID_EMAILS` | no | | With accounts on: comma-separated e-mail addresses of paid accounts. Everyone else is on the free plan |
+| `UNLIMITED_EMAILS` | no | | With accounts on: comma-separated e-mail addresses of accounts with everything of the paid plan and no limits |
 
-With accounts on, AI use is limited per account: gradings and explanations per month (`AI_LIMITS` in
+With accounts on, AI use is limited per account: gradings, explanations and turns of the study tandem per month (`AI_LIMITS` in
 `src/server/quota.ts`: 500 paid; 1000 free as a guard against scripts, since free accounts use free
 and very cheap models), card generation and pictures read by the AI per day.
 Without accounts (local mode) nothing is counted.
@@ -97,7 +101,8 @@ and their library syncs between all their devices. The browser still keeps a loc
 works on it directly, so the app stays fast; changes are sent to the server in the background.
 
 Sent to the AI provider in both modes: the question, your solution and your answer for
-grading, the audio recording for transcription, and the text of material you turn into cards.
+grading, the audio recording for transcription, the text of material you turn into cards, and
+in the study tandem the text of the folder's cards together with the conversation.
 Pictures in cards are never sent to the AI.
 
 ## Accounts, sync and MCP (server mode)
@@ -279,6 +284,7 @@ src/lib/ankiExport.ts    writing Anki packages (src/lib/sqliteWrite.ts, src/lib/
 src/lib/offline.ts       registering the service worker and storing the pages
 src/server/shares.ts     folders shared by link
 src/server/generate.ts   AI cards from study material
+src/server/tandem.ts     study tandem: the partner's instructions, its reply and its voice (src/lib/tandem.ts)
 docs/design-references/  screens of other flashcard apps used as inspiration
 ```
 

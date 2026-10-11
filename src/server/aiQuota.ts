@@ -11,7 +11,7 @@ function nextReset(now = new Date()): string {
 }
 
 export interface AiAllowance {
-  /** Null without accounts: the operator's own key pays and nothing is counted. */
+  /** Null without accounts and for unlimited accounts: nothing is counted. */
   userId: string | null;
   /** What is left after this request; null when nothing is counted. */
   remaining: number | null;
@@ -24,7 +24,7 @@ export interface AiAllowance {
  */
 export async function takeAi(plan: Plan): Promise<AiAllowance | Response> {
   const user = SERVER_MODE ? await currentUser() : null;
-  if (!user) return { userId: null, remaining: null, limit: null };
+  if (!user || plan === "unlimited") return { userId: null, remaining: null, limit: null };
   const remaining = await takeQuota(getDb(), "ai", user.id, plan);
   if (remaining === null) {
     return Response.json(

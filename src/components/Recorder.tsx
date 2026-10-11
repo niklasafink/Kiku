@@ -47,6 +47,8 @@ export function Recorder({
   compact = false,
   autoStart = 0,
   stopAfterSilence,
+  onStart,
+  label = "Antwort einsprechen",
 }: {
   onTranscript: (text: string) => void;
   disabled?: boolean;
@@ -59,6 +61,10 @@ export function Recorder({
   autoStart?: number;
   /** Ends the recording by itself after this many milliseconds of silence, once something was said. */
   stopAfterSilence?: number;
+  /** Called when a recording is about to begin, e.g. to silence whatever is being played. */
+  onStart?: () => void;
+  /** What the button is for, shown below it and read by screen readers. */
+  label?: string;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [seconds, setSeconds] = useState(0);
@@ -133,6 +139,7 @@ export function Recorder({
   async function start() {
     if (phase !== "idle") return;
     setError(null);
+    onStart?.();
     if (browser) return startInBrowser();
     if (!navigator.mediaDevices?.getUserMedia || typeof AudioWorkletNode === "undefined") {
       setError("Das Mikrofon ist hier nicht verfügbar. Es funktioniert nur über HTTPS oder localhost.");
@@ -281,14 +288,14 @@ export function Recorder({
           onClick={start}
           disabled={disabled || busy}
           className={`btn btn-primary btn-circle btn-chunky ${size}`}
-          aria-label="Antwort einsprechen"
+          aria-label={label}
         >
           {busy ? <span className={`loading loading-spinner ${compact ? "loading-md" : "loading-lg"}`} /> : <Mic className={compact ? "size-5" : "size-7"} />}
         </button>
       )}
 
       <p className={compact ? "text-center text-[11px] leading-tight font-bold" : "min-h-6 text-sm font-bold"} aria-live="polite">
-        {(phase === "idle" || phase === "starting") && <span className="opacity-70">Antwort einsprechen</span>}
+        {(phase === "idle" || phase === "starting") && <span className="opacity-70">{label}</span>}
         {phase === "recording" && <span className="tabular-nums">{compact ? formatDuration(seconds) : `Aufnahme läuft · ${formatDuration(seconds)}`}</span>}
         {phase === "transcribing" && <span className="opacity-70">{compact ? "Transkribiert …" : "Wird transkribiert …"}</span>}
       </p>

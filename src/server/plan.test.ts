@@ -17,4 +17,12 @@ describe("planOf", () => {
     expect(planOf(user("b@example.com"))).toBe("paid");
     expect(planOf(user("c@example.com"))).toBe("free");
   });
+
+  it("puts addresses listed as unlimited above the paid plan", () => {
+    vi.stubEnv("PAID_EMAILS", "a@example.com");
+    vi.stubEnv("UNLIMITED_EMAILS", "A@example.com, b@example.com");
+    expect(planOf(user("a@example.com"))).toBe("unlimited");
+    expect(planOf(user("b@example.com"))).toBe("unlimited");
+    expect(planOf(user("c@example.com"))).toBe("free");
+  });
 });

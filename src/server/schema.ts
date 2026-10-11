@@ -1,4 +1,5 @@
 import { bigint, index, integer, jsonb, pgSequence, pgTable, text } from "drizzle-orm/pg-core";
+import type { StudyPlan } from "@/lib/studyPlan";
 import type { InputMode, Segment } from "@/lib/types";
 
 /** Every write takes the next value. Clients pull "everything with a higher rev than last time". */
@@ -95,6 +96,14 @@ export const apiTokens = pgTable(
   },
   (t) => [index("api_tokens_user").on(t.userId)],
 );
+
+/** One study plan per account, with the keys of the steps ticked off so far. */
+export const studyPlans = pgTable("study_plans", {
+  userId: text("user_id").primaryKey(),
+  plan: jsonb("plan").$type<StudyPlan>().notNull(),
+  done: jsonb("done").$type<string[]>().notNull().default([]),
+  updatedAt: ms("updated_at").notNull(),
+});
 
 /**
  * Daily counters: the public demo on the homepage (the id is a hash, no IP address is stored)

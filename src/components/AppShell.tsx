@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { ChartNoAxesColumn, CloudAlert, CloudCheck, Flame, House, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
+import { CalendarCheck, ChartNoAxesColumn, CloudAlert, CloudCheck, Flame, House, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
 import { AccountProvider, useAccount, useSyncState } from "@/components/Account";
 import { useAttemptLog, useFolders } from "@/lib/hooks";
 import { db } from "@/lib/db";
@@ -250,6 +250,14 @@ function Shell({ children }: { children: ReactNode }) {
                 <StreakBadge />
               </Link>
             </li>
+            {account.mode === "server" && account.user?.hasStudyPlan && (
+              <li>
+                <Link href="/plan" onClick={close} className={pathname === "/plan" ? "menu-active" : ""}>
+                  <CalendarCheck className="size-5" />
+                  Lernplan
+                </Link>
+              </li>
+            )}
             {childrenOf(folders, null).map((folder) => (
               <TreeNode key={folder.id} folder={folder} folders={folders} pathname={pathname} onNavigate={close} />
             ))}
