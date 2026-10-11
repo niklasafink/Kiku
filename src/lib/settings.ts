@@ -68,3 +68,35 @@ export function setTandemVoice(value: TandemVoiceSetting): void {
 export function useTandemVoice(): TandemVoiceSetting {
   return useSyncExternalStore(subscribe, tandemVoiceSetting, () => TANDEM_VOICES[0].id);
 }
+
+const OPEN_FOLDERS_KEY = "kiku-open-folders";
+
+/** Ids of the folders unfolded in the sidebar, as stored: a JSON list. */
+function openFoldersSetting(): string {
+  return read(OPEN_FOLDERS_KEY) ?? "[]";
+}
+
+export function parseOpenFolders(stored: string): Set<string> {
+  try {
+    const value: unknown = JSON.parse(stored);
+    return new Set(Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Unfolds or folds folders in the sidebar; nothing is written when that changes nothing. */
+export function setFoldersOpen(ids: string[], open: boolean): void {
+  const current = parseOpenFolders(openFoldersSetting());
+  const before = current.size;
+  for (const id of ids) {
+    if (open) current.add(id);
+    else current.delete(id);
+  }
+  if (current.size !== before) write(OPEN_FOLDERS_KEY, current.size > 0 ? JSON.stringify([...current]) : null);
+}
+
+/** The stored list itself, which stays the same string until it changes; parse it with parseOpenFolders. */
+export function useOpenFolders(): string {
+  return useSyncExternalStore(subscribe, openFoldersSetting, () => "[]");
+}

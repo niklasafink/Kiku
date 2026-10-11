@@ -1,9 +1,13 @@
 "use client";
 
 import { useRef, useState, useSyncExternalStore } from "react";
-import { Download, Upload } from "lucide-react";
+import { Download, FileText, Upload } from "lucide-react";
 import { useAccount } from "@/components/Account";
 import { AccountSettings } from "@/components/AccountSettings";
+import { db } from "@/lib/db";
+import { downloadFile, fileName } from "@/lib/exportCards";
+import { storedImage } from "@/lib/images";
+import { buildMarkdownBackup } from "@/lib/markdownExport";
 import { exportAll, importAll } from "@/lib/repo";
 import { MAX_NEW_PER_DAY, setNewPerDay, useNewPerDay } from "@/lib/settings";
 import { NEW_PER_DAY } from "@/lib/srs";
@@ -45,6 +49,7 @@ export default function SettingsPage() {
   const synced = useAccount().mode === "server";
   const newPerDay = useNewPerDay();
   const fileInput = useRef<HTMLInputElement>(null);
+  const [writing, setWriting] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   async function handleExport() {
@@ -55,6 +60,19 @@ export default function SettingsPage() {
     link.download = `kiku-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function handleMarkdown() {
+    setWriting(true);
+    try {
+      const [cards, folders] = await Promise.all([db.cards.toArray(), db.folders.toArray()]);
+      const backup = await buildMarkdownBackup(cards, folders, storedImage);
+      downloadFile(fileName("kiku-karten", backup.extension), backup.content, backup.content.type);
+    } catch {
+      setMessage({ tone: "error", text: "Das Markdown-Dokument konnte nicht erstellt werden." });
+    } finally {
+      setWriting(false);
+    }
   }
 
   async function handleImport(file: File) {
@@ -132,6 +150,10 @@ export default function SettingsPage() {
           <button className="btn btn-chunky bg-base-200" onClick={() => fileInput.current?.click()}>
             <Upload className="size-5" /> Backup einspielen
           </button>
+          <button className="btn btn-chunky bg-base-200" onClick={handleMarkdown} disabled={writing}>
+            {writing ? <span className="loading loading-spinner loading-sm" /> : <FileText className="size-5" />} Karten als
+            Markdown
+          </button>
           <input
             ref={fileInput}
             type="file"
@@ -146,6 +168,8 @@ export default function SettingsPage() {
         </div>
         <p className="text-sm opacity-70">
           Beim Einspielen werden vorhandene Einträge mit gleicher Kennung überschrieben, alles andere bleibt erhalten.
+          Das Markdown-Dokument enthält alle Karten nach Ordnern zum Lesen in jedem Editor, auch ohne Kiku und ohne
+          Internet; einspielen lässt es sich nicht.
         </p>
         {message && (
           <p role="status" className={`alert alert-soft ${message.tone === "success" ? "alert-success" : "alert-error"}`}>

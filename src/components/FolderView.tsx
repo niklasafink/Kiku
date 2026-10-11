@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   CalendarClock,
   CalendarDays,
@@ -44,10 +44,10 @@ import { ShareForm } from "@/components/ShareForm";
 import { tagCounts, TagFilter } from "@/components/Tags";
 import { buildAnkiPackage } from "@/lib/ankiExport";
 import { importAnkiPackage } from "@/lib/ankiImport";
-import { db } from "@/lib/db";
 import { downloadFile, exportCards, fileName, type ExportFormat } from "@/lib/exportCards";
 import { formatDate, inDays, pluralize } from "@/lib/format";
-import { imageUrl } from "@/lib/images";
+import { storedImage } from "@/lib/images";
+import { buildMarkdownBackup } from "@/lib/markdownExport";
 import { useAllCards, useAttemptLog, useFolders, useLatestAttempts, useSavedSession, useSchedules } from "@/lib/hooks";
 import { renderOcclusion } from "@/lib/occlusion";
 import {
@@ -68,7 +68,7 @@ import { daysUntil, examDates, planToday } from "@/lib/srs";
 import { createSampleFolder } from "@/lib/sample";
 import { showToast } from "@/lib/toast";
 import { streakOf } from "@/lib/stats";
-import { EXAM_CARDS, isWeak } from "@/lib/study";
+import { isWeak } from "@/lib/study";
 import { childrenOf, descendantIds } from "@/lib/tree";
 
 type Dialog =
@@ -111,6 +111,24 @@ function Mastery({ done, total, className = "" }: { done: number; total: number;
       <span className="tabular-nums opacity-60">
         {done}/{total}
       </span>
+    </div>
+  );
+}
+
+/** A toolbar action shown as its icon alone; the name appears on hover and is what screen readers get. */
+function IconAction({ label, href, onClick, children }: { label: string; href?: string; onClick?: () => void; children: ReactNode }) {
+  const className = "btn btn-chunky btn-square bg-base-100";
+  return (
+    <div className="tooltip tooltip-bottom" data-tip={label}>
+      {href ? (
+        <Link href={href} className={className} aria-label={label}>
+          {children}
+        </Link>
+      ) : (
+        <button className={className} aria-label={label} onClick={onClick}>
+          {children}
+        </button>
+      )}
     </div>
   );
 }
@@ -265,7 +283,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
           )}
         </div>
 
-        <div className="mt-1 flex flex-wrap gap-2.5">
+        <div className="mt-1 flex flex-wrap items-center gap-2.5">
           {todayCount > 0 && (
             <Link
               href={folder ? `/f/${folder.id}/learn?mode=due` : "/learn"}
@@ -313,48 +331,46 @@ export function FolderView({ folderId }: { folderId: string | null }) {
             </Link>
           )}
           {folder && scope.length > 1 && (
-            <Link
-              href={`/f/${folder.id}/learn?mode=exam`}
-              className="btn btn-chunky bg-base-100"
-              title={`Bis zu ${EXAM_CARDS} zufällige Karten ohne Hilfen, die Auswertung kommt erst am Ende`}
-            >
+            <IconAction label="Prüfung simulieren" href={`/f/${folder.id}/learn?mode=exam`}>
               <GraduationCap className="size-4" />
-              Prüfung simulieren
-            </Link>
+            </IconAction>
           )}
           {folder && scope.length > 0 && (
-            <Link
-              href={`/f/${folder.id}/tandem`}
-              className="btn btn-chunky bg-base-100"
-              title="Sprich mit der KI über die Karten dieses Ordners: abfragen lassen, erklären, nachfragen"
-            >
+            <IconAction label="Tandem: mit der KI über die Karten sprechen" href={`/f/${folder.id}/tandem`}>
               <MessagesSquare className="size-4" />
-              Tandem
-            </Link>
+            </IconAction>
           )}
-          {folder && (
-            <button className="btn btn-chunky bg-base-100" onClick={() => setDialog("card")}>
-              <Plus className="size-4" /> Neue Karte
-            </button>
-          )}
-          {folder && (
-            <button className="btn btn-chunky bg-base-100" onClick={() => setDialog("generate")}>
-              <Sparkles className="size-4" /> Aus Unterlagen
-            </button>
-          )}
-          {folder && (
-            <button className="btn btn-chunky bg-base-100" onClick={() => setDialog("import")}>
-              <FileUp className="size-4" /> Importieren
-            </button>
-          )}
-          {scope.length > 0 && (
-            <button className="btn btn-chunky bg-base-100" onClick={() => setDialog("export")}>
-              <Download className="size-4" /> Exportieren
-            </button>
-          )}
-          <button className="btn btn-chunky bg-base-100" onClick={() => setDialog("folder")}>
-            <FolderPlus className="size-4" /> {folder ? "Unterordner" : "Neuer Ordner"}
-          </button>
+          <div className="ml-auto flex flex-wrap items-center gap-2.5">
+            {folder && (
+              <button className="btn btn-chunky bg-base-100" onClick={() => setDialog("card")}>
+                <Plus className="size-4" /> Neue Karte
+              </button>
+            )}
+            {folder && (
+              <IconAction label="Karten aus Unterlagen erstellen" onClick={() => setDialog("generate")}>
+                <Sparkles className="size-4" />
+              </IconAction>
+            )}
+            {folder && (
+              <IconAction label="Importieren" onClick={() => setDialog("import")}>
+                <FileUp className="size-4" />
+              </IconAction>
+            )}
+            {scope.length > 0 && (
+              <IconAction label="Exportieren" onClick={() => setDialog("export")}>
+                <Download className="size-4" />
+              </IconAction>
+            )}
+            {folder ? (
+              <IconAction label="Neuer Unterordner" onClick={() => setDialog("folder")}>
+                <FolderPlus className="size-4" />
+              </IconAction>
+            ) : (
+              <button className="btn btn-chunky bg-base-100" onClick={() => setDialog("folder")}>
+                <FolderPlus className="size-4" /> Neuer Ordner
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -498,14 +514,13 @@ export function FolderView({ folderId }: { folderId: string | null }) {
             if (format === "apkg") {
               const pkg = await buildAnkiPackage(scope, folders, {
                 rootName: folder?.name ?? "Kiku",
-                image: async (id) => {
-                  // Makes sure a picture added on another device is on this one.
-                  await imageUrl(id);
-                  return (await db.images.get(id)) ?? null;
-                },
+                image: storedImage,
                 occlude: renderOcclusion,
               });
               downloadFile(fileName(name, "apkg"), pkg, "application/apkg");
+            } else if (format === "md") {
+              const backup = await buildMarkdownBackup(scope, folders, storedImage);
+              downloadFile(fileName(name, backup.extension), backup.content, backup.content.type);
             } else {
               const text = exportCards(scope, folders, format);
               if (format === "csv") downloadFile(fileName(name, "csv"), text, "text/csv;charset=utf-8");
@@ -687,16 +702,16 @@ function ExportChoice({
   onCancel,
 }: {
   count: number;
-  onChoose: (format: ExportFormat | "apkg") => void | Promise<void>;
+  onChoose: (format: ExportFormat | "apkg" | "md") => void | Promise<void>;
   onCancel: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"apkg" | "md" | null>(null);
   const option = "tile flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left";
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm opacity-70">
-        {pluralize(count, "Karte", "Karten")}, einschließlich aller Unterordner. Alle Dateien lassen sich hier auch
-        wieder importieren.
+        {pluralize(count, "Karte", "Karten")}, einschließlich aller Unterordner. Bis auf das Markdown-Dokument lassen
+        sich alle Dateien hier auch wieder importieren.
       </p>
       <button className={option} onClick={() => onChoose("csv")}>
         <span className="font-extrabold">Tabelle (.csv)</span>
@@ -704,14 +719,14 @@ function ExportChoice({
       </button>
       <button
         className={option}
-        disabled={busy}
+        disabled={busy !== null}
         onClick={async () => {
-          setBusy(true);
+          setBusy("apkg");
           await onChoose("apkg");
         }}
       >
         <span className="flex items-center gap-2 font-extrabold">
-          Anki-Paket (.apkg) {busy && <span className="loading loading-spinner loading-xs" />}
+          Anki-Paket (.apkg) {busy === "apkg" && <span className="loading loading-spinner loading-xs" />}
         </span>
         <span className="text-sm opacity-70">
           Für Anki am Computer und auf dem Handy. Mit Bildern, Formatierung, Formeln und Ordnern als Stapel.
@@ -726,6 +741,21 @@ function ExportChoice({
       <button className={option} onClick={() => onChoose("tab")}>
         <span className="font-extrabold">Text mit Tabulator (.txt)</span>
         <span className="text-sm opacity-70">Für Quizlet und andere Lern-Apps. Ohne Bilder.</span>
+      </button>
+      <button
+        className={option}
+        disabled={busy !== null}
+        onClick={async () => {
+          setBusy("md");
+          await onChoose("md");
+        }}
+      >
+        <span className="flex items-center gap-2 font-extrabold">
+          Markdown-Dokument (.md) {busy === "md" && <span className="loading loading-spinner loading-xs" />}
+        </span>
+        <span className="text-sm opacity-70">
+          Zum Lesen in jedem Editor, auch ohne Kiku und ohne Internet. Mit Bildern wird daraus ein ZIP-Archiv.
+        </span>
       </button>
       <div className="modal-action mt-1">
         <button className="btn btn-ghost" onClick={onCancel}>

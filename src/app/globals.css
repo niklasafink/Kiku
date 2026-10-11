@@ -202,39 +202,16 @@ a.tile:active {
   animation: pop-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1.1) both;
 }
 
-/* The sidebar card of whoever runs the app: the logo's gradient with a sheen passing over it now and then. */
+/* The sidebar card of whoever runs the app: the logo's gradient. */
 .admin-card {
-  position: relative;
-  overflow: hidden;
   border-radius: var(--radius-box);
   background: linear-gradient(135deg, #6c62ff, #4a3ee0);
   box-shadow: 0 3px 0 #3329a8;
   color: #fff;
 }
-.admin-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(105deg, transparent 35%, rgb(255 255 255 / 0.28) 50%, transparent 65%);
-  transform: translateX(-100%);
-  animation: admin-sheen 6s ease-in-out infinite;
-  pointer-events: none;
-}
-@keyframes admin-sheen {
-  0%,
-  70% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .pop-in {
-    animation: none;
-  }
-  .admin-card::after {
     animation: none;
   }
   .btn-chunky,

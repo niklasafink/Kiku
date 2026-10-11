@@ -3,7 +3,7 @@
 // because every Anki version on every platform still imports it.
 import { decodeEntities, markdownToHtml } from "./html";
 import { occlusionAlt, parseOcclusion, type ImageFile, type Occlusion } from "./occlusion";
-import { IMAGE_SCHEME, imageRefs } from "./richText";
+import { IMAGE_SCHEME, imageExtension, imageRefs } from "./richText";
 import { writeSqlite, type SqlWriteValue } from "./sqliteWrite";
 import { pathTo } from "./tree";
 import type { Card, Folder } from "./types";
@@ -311,18 +311,6 @@ function fieldHtml(text: string, files: Map<string, string>): string {
     .normalize("NFC");
 }
 
-const EXTENSIONS: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/gif": "gif",
-  "image/webp": "webp",
-  "image/avif": "avif",
-  "image/bmp": "bmp",
-  "image/svg+xml": "svg",
-};
-
-const extensionOf = (type: string) => EXTENSIONS[type.split(";")[0].trim().toLowerCase()] ?? "png";
-
 interface Media {
   name: string;
   data: Uint8Array;
@@ -346,7 +334,7 @@ async function collectMedia(
   const original = (id: string, found: ImageFile) => {
     let name = files.get(id);
     if (!name) {
-      name = `kiku-${id}.${extensionOf(found.type)}`;
+      name = `kiku-${id}.${imageExtension(found.type)}`;
       files.set(id, name);
       media.push({ name, data: new Uint8Array(found.data) });
     }
@@ -371,7 +359,7 @@ async function collectMedia(
       // The file name tells the renderings of one picture apart: a short hash of the boxes,
       // the asked box and the side (q = question, a = answer). Stable across exports.
       const boxes = leading(await sha1(occlusionAlt(occlusion.boxes, 0, false)), 4).toString(16).padStart(8, "0");
-      const name = `kiku-${id}-occ-${boxes}-${occlusion.asked}${occlusion.revealed ? "a" : "q"}.${extensionOf(rendered.type)}`;
+      const name = `kiku-${id}-occ-${boxes}-${occlusion.asked}${occlusion.revealed ? "a" : "q"}.${imageExtension(rendered.type)}`;
       files.set(key, name);
       media.push({ name, data: new Uint8Array(rendered.data) });
     }

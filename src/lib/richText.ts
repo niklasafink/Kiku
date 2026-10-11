@@ -152,6 +152,21 @@ export function imageMarkup(id: string): string {
   return `![](${IMAGE_SCHEME}${id})`;
 }
 
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/avif": "avif",
+  "image/bmp": "bmp",
+  "image/svg+xml": "svg",
+};
+
+/** File extension for a picture of this media type, for the exports that write pictures as files. */
+export function imageExtension(type: string): string {
+  return IMAGE_EXTENSIONS[type.split(";")[0].trim().toLowerCase()] ?? "png";
+}
+
 /**
  * The text without markup: what the AI grades and what list previews show. Pictures are left
  * out, the wording itself is untouched.

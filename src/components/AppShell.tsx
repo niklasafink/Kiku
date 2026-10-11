@@ -2,45 +2,81 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { CalendarCheck, ChartNoAxesColumn, CloudAlert, CloudCheck, Crown, Flame, House, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
+import { CalendarCheck, ChartNoAxesColumn, ChevronRight, CloudAlert, CloudCheck, Crown, Flame, House, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
 import { AccountProvider, useAccount, useSyncState } from "@/components/Account";
 import { useAttemptLog, useFolders } from "@/lib/hooks";
 import { db } from "@/lib/db";
 import { cleanupImages } from "@/lib/images";
 import { enableOffline } from "@/lib/offline";
 import { gradePendingAnswers } from "@/lib/pendingGrades";
+import { parseOpenFolders, setFoldersOpen, useOpenFolders } from "@/lib/settings";
 import { showToast } from "@/lib/toast";
 import { streakOf } from "@/lib/stats";
-import { childrenOf } from "@/lib/tree";
+import { pathTo } from "@/lib/tree";
 import type { Folder } from "@/lib/types";
 import { KikuMark } from "@/components/KikuMark";
 import { Toasts } from "@/components/Toasts";
 
+/** Folders grouped by their parent and sorted by name, built once per change instead of once per row. */
+function groupByParent(folders: Folder[]): Map<string | null, Folder[]> {
+  const groups = new Map<string | null, Folder[]>();
+  for (const folder of [...folders].sort((a, b) => a.name.localeCompare(b.name, "de"))) {
+    const group = groups.get(folder.parentId);
+    if (group) group.push(folder);
+    else groups.set(folder.parentId, [folder]);
+  }
+  return groups;
+}
+
+/** One folder in the sidebar. Its subfolders are only rendered while it is unfolded. */
 function TreeNode({
   folder,
-  folders,
+  tree,
+  open,
+  depth,
   pathname,
   onNavigate,
 }: {
   folder: Folder;
-  folders: Folder[];
+  tree: Map<string | null, Folder[]>;
+  open: Set<string>;
+  depth: number;
   pathname: string;
   onNavigate: () => void;
 }) {
   const href = `/f/${folder.id}`;
-  const children = childrenOf(folders, folder.id);
+  const children = tree.get(folder.id);
+  const isOpen = open.has(folder.id);
+  const active = pathname === href;
   return (
     <li>
-      <Link href={href} onClick={onNavigate} className={pathname === href ? "menu-active" : ""}>
-        <span aria-hidden>{folder.emoji}</span>
-        <span className="truncate">{folder.name}</span>
-      </Link>
-      {children.length > 0 && (
+      <div
+        className={`flex items-center rounded-field ${active ? "bg-neutral text-neutral-content" : "hover:bg-base-200"}`}
+        style={{ paddingLeft: depth * 14 }}
+      >
+        {children ? (
+          <button
+            className="grid size-7 shrink-0 place-items-center rounded-field opacity-60 hover:opacity-100"
+            aria-expanded={isOpen}
+            aria-label={`Unterordner von ${folder.name} ${isOpen ? "zuklappen" : "aufklappen"}`}
+            onClick={() => setFoldersOpen([folder.id], !isOpen)}
+          >
+            <ChevronRight className={`size-4 transition-transform duration-150 ${isOpen ? "rotate-90" : ""}`} aria-hidden />
+          </button>
+        ) : (
+          <span className="size-7 shrink-0" />
+        )}
+        <Link href={href} onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-3" aria-current={active ? "page" : undefined}>
+          <span aria-hidden>{folder.emoji}</span>
+          <span className="truncate">{folder.name}</span>
+        </Link>
+      </div>
+      {children && isOpen && (
         <ul>
           {children.map((child) => (
-            <TreeNode key={child.id} folder={child} folders={folders} pathname={pathname} onNavigate={onNavigate} />
+            <TreeNode key={child.id} folder={child} tree={tree} open={open} depth={depth + 1} pathname={pathname} onNavigate={onNavigate} />
           ))}
         </ul>
       )}
@@ -99,7 +135,7 @@ function AccountBadge() {
 
   if (plan === "admin") {
     return (
-      <div className="admin-card flex items-center gap-3 p-3" title={email}>
+      <div className="admin-card mb-1 flex items-center gap-3 p-3" title={email}>
         <span className="grid size-10 shrink-0 place-items-center rounded-full bg-white/15 text-lg font-black ring-2 ring-accent" aria-hidden>
           {initial}
         </span>
@@ -110,7 +146,6 @@ function AccountBadge() {
             Admin
           </div>
         </div>
-        <SyncIcon />
       </div>
     );
   }
@@ -182,8 +217,19 @@ function Shell({ children }: { children: ReactNode }) {
     if (account.mode === "local") void cleanupImages(false);
   }, [account.mode]);
 
-  const folders = useFolders() ?? [];
+  const loadedFolders = useFolders();
+  const folders = useMemo(() => loadedFolders ?? [], [loadedFolders]);
   const [open, setOpen] = useState(false);
+  const tree = useMemo(() => groupByParent(folders), [folders]);
+  const storedOpenFolders = useOpenFolders();
+  const openFolders = useMemo(() => parseOpenFolders(storedOpenFolders), [storedOpenFolders]);
+  // Opening a folder unfolds the way down to it, so the sidebar always shows where you are.
+  const currentFolderId = pathname.startsWith("/f/") ? pathname.split("/")[2] : null;
+  useEffect(() => {
+    if (!currentFolderId) return;
+    const parents = pathTo(folders, currentFolderId).slice(0, -1);
+    if (parents.length > 0) setFoldersOpen(parents.map((f) => f.id), true);
+  }, [currentFolderId, folders]);
 
   // Stores the pages of the app for use without a network, once the library is there to pick examples from.
   const inApp = account.mode === "local" || signedIn;
@@ -266,7 +312,7 @@ function Shell({ children }: { children: ReactNode }) {
               </Link>
             )}
           </div>
-          <ul className="menu w-full flex-1 p-0 font-semibold">
+          <ul className="menu w-full p-0 font-semibold">
             <li>
               <Link href="/" onClick={close} className={pathname === "/" ? "menu-active" : ""}>
                 <Library className="size-5" />
@@ -294,10 +340,19 @@ function Shell({ children }: { children: ReactNode }) {
                 </Link>
               </li>
             )}
-            {childrenOf(folders, null).map((folder) => (
-              <TreeNode key={folder.id} folder={folder} folders={folders} pathname={pathname} onNavigate={close} />
-            ))}
           </ul>
+          <div className="mt-4 flex-1">
+            {tree.has(null) && (
+              <>
+                <h2 className="mb-1 px-3 text-xs font-extrabold tracking-wide uppercase opacity-60">Ordner</h2>
+                <ul className="text-sm font-medium">
+                  {tree.get(null)!.map((folder) => (
+                    <TreeNode key={folder.id} folder={folder} tree={tree} open={openFolders} depth={0} pathname={pathname} onNavigate={close} />
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
           <AccountBadge />
           <ul className="menu w-full p-0 font-semibold">
             <li>

@@ -3,6 +3,7 @@
 import { db } from "./db";
 import { newId } from "./repo";
 import { imageIds } from "./richText";
+import type { StoredImage } from "./types";
 
 /** Longest edge after scaling; enough to read a slide or a diagram. */
 const MAX_EDGE = 1600;
@@ -74,6 +75,12 @@ async function load(id: string): Promise<string | null> {
     await db.images.put(image);
   }
   return URL.createObjectURL(new Blob([image.data], { type: image.type }));
+}
+
+/** The picture itself for the exports, fetched from the account first if this device lacks it. */
+export async function storedImage(id: string): Promise<StoredImage | null> {
+  await imageUrl(id);
+  return (await db.images.get(id)) ?? null;
 }
 
 /** Object URL of a picture, or null if neither this device nor the account has it. */
