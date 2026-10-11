@@ -103,9 +103,9 @@ describe("monthly AI quota", () => {
     expect(await takeQuota(db, "ai", "u2", "free", "2026-10")).toBe(AI_LIMITS.free - 1);
   });
 
-  it("never runs out for unlimited accounts", async () => {
-    for (let used = 0; used < 3; used++) expect(await takeQuota(db, "generate", "u1", "unlimited", "2026-10-10")).toBe(Infinity);
-    expect(await remainingQuota(db, "ai", "u1", "unlimited", "2026-10")).toBe(Infinity);
+  it("never runs out for the admin", async () => {
+    for (let used = 0; used < 3; used++) expect(await takeQuota(db, "generate", "u1", "admin", "2026-10-10")).toBe(Infinity);
+    expect(await remainingQuota(db, "ai", "u1", "admin", "2026-10")).toBe(Infinity);
     // Nothing was counted, so the same account on a counted plan starts at the full allowance.
     expect(await takeGenerateQuota(db, "u1", "free", "2026-10-10")).toBe(GENERATE_LIMITS.free - 1);
   });

@@ -28,7 +28,7 @@ const usageId = (kind: QuotaKind, userId: string, period: string) => `${kind}:${
 
 /**
  * Uses one request of the allowance. Returns how many are left, or null if none was.
- * Unlimited accounts are not counted: they always have Infinity left.
+ * The admin is not counted and always has Infinity left.
  */
 export async function takeQuota(
   db: Database,
@@ -37,7 +37,7 @@ export async function takeQuota(
   plan: Plan,
   period = periodOf(kind),
 ): Promise<number | null> {
-  if (plan === "unlimited") return Infinity;
+  if (plan === "admin") return Infinity;
   const limit = LIMITS[kind][plan];
   const [row] = await db
     .insert(demoUsage)
@@ -61,7 +61,7 @@ export async function refundQuota(db: Database, kind: QuotaKind, userId: string,
 
 /** How much of the allowance is left without using any of it. */
 export async function remainingQuota(db: Database, kind: QuotaKind, userId: string, plan: Plan, period = periodOf(kind)): Promise<number> {
-  if (plan === "unlimited") return Infinity;
+  if (plan === "admin") return Infinity;
   const [row] = await db.select({ count: demoUsage.count }).from(demoUsage).where(eq(demoUsage.id, usageId(kind, userId, period)));
   return Math.max(0, LIMITS[kind][plan] - (row?.count ?? 0));
 }

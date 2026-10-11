@@ -10,9 +10,9 @@ export async function GET() {
   if (!user) return Response.json({ user: null });
   const plan = planOf(user);
   // How many gradings the month still has, shown in the settings.
-  // Unlimited accounts have no number to show.
+  // The admin is not counted and has no number to show.
   const ai =
-    plan === "unlimited"
+    plan === "admin"
       ? undefined
       : { remaining: await remainingQuota(getDb(), "ai", user.id, plan), limit: AI_LIMITS[plan] };
   // Only accounts with a study plan get the link to it in the sidebar.

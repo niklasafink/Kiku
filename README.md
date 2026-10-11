@@ -71,7 +71,7 @@ Open http://localhost:3000.
 | `TANDEM_MODEL` | no | the grading model | Model that talks in the study tandem |
 | `SPEECH_MODEL` | no | `elevenlabs/eleven-v4-turbo` | Text-to-speech model on OpenRouter that voices the tandem |
 | `PAID_EMAILS` | no | | With accounts on: comma-separated e-mail addresses of paid accounts. Everyone else is on the free plan |
-| `UNLIMITED_EMAILS` | no | | With accounts on: comma-separated e-mail addresses of accounts with everything of the paid plan and no limits |
+| `ADMIN_EMAILS` | no | | With accounts on: comma-separated e-mail addresses of whoever runs the app: everything of the paid plan and no limits |
 
 With accounts on, AI use is limited per account: gradings, explanations and turns of the study tandem per month (`AI_LIMITS` in
 `src/server/quota.ts`: 500 paid; 1000 free as a guard against scripts, since free accounts use free
@@ -118,8 +118,9 @@ Pictures in cards are never sent to the AI.
 
 Data you created in local mode before your first sign-in on a device is added to your account.
 Signing out removes the local copy from that device; the library stays in the account. The
-settings offer changing the password and deleting the account (library, pictures, shares and
-tokens on the server, then the account at Neon Auth); "Passwort vergessen" on the sign-in page
+settings offer changing the password and deleting the account (the server checks the password, then
+removes library, pictures, shares and tokens and finally the sign-in account in the `neon_auth`
+schema; other devices are signed out within five minutes); "Passwort vergessen" on the sign-in page
 sends a reset link through Neon Auth.
 
 ### How sync works

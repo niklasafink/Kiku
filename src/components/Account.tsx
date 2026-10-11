@@ -8,7 +8,7 @@ export interface AccountUser {
   id: string;
   email: string;
   name: string;
-  plan: "free" | "paid" | "unlimited";
+  plan: "free" | "paid" | "admin";
   /** Gradings and explanations left this month. Missing while the app is offline. */
   ai?: { remaining: number; limit: number };
   /** Whether a study plan is stored for the account. */
@@ -122,24 +122,21 @@ export function AccountProvider({ serverMode, children }: { serverMode: boolean;
   const deleteAccount = useCallback(
     async (password: string) => {
       if (!user) return;
-      // The password proves it is really the owner, and gives a session fresh enough for the deletion.
-      const check = await authAttempt(() => authClient.signIn.email({ email: user.email, password }));
-      if (check === null) throw new Error("Der Server ist nicht erreichbar. Bitte versuche es noch einmal.");
-      if (check) throw new Error("Das Passwort stimmt nicht.");
-      // Nothing of this device may be sent to the server again, so the local copy goes first.
-      await wipeLocal();
-      const response = await fetch("/api/account", { method: "DELETE" });
-      if (!response.ok) throw new Error("Die Daten konnten nicht gelöscht werden. Bitte versuche es noch einmal.");
-      const gone = await authAttempt(() => authClient.deleteUser({ password }));
-      await wipeLocal();
-      rememberUser(null);
-      if (gone !== undefined) {
-        await authClient.signOut();
-        setUser(null);
-        throw new Error(
-          "Deine Ordner, Karten und Bilder sind gelöscht, aber das Anmeldekonto konnte nicht entfernt werden. Schreib uns kurz, dann erledigen wir das.",
-        );
+      // The server checks the password, then deletes the library and the sign-in account.
+      const response = await fetch("/api/account", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      }).catch(() => null);
+      if (!response) throw new Error("Der Server ist nicht erreichbar. Bitte versuche es noch einmal.");
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? "Das Konto konnte nicht gelöscht werden. Bitte versuche es noch einmal.");
       }
+      // The account is gone; what is left is this device's copy and its session cookies.
+      await authAttempt(() => authClient.signOut());
+      rememberUser(null);
+      await wipeLocal();
       setUser(null);
     },
     [user],

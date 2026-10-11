@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { CalendarCheck, ChartNoAxesColumn, CloudAlert, CloudCheck, Flame, House, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
+import { CalendarCheck, ChartNoAxesColumn, CloudAlert, CloudCheck, Crown, Flame, House, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
 import { AccountProvider, useAccount, useSyncState } from "@/components/Account";
 import { useAttemptLog, useFolders } from "@/lib/hooks";
 import { db } from "@/lib/db";
@@ -70,25 +70,61 @@ function StreakBadge() {
   );
 }
 
-/** Small line in the sidebar: who is signed in and whether this device is up to date. */
-function SyncStatus() {
-  const account = useAccount();
+/** Whether this device is up to date with the account. */
+function SyncIcon() {
   const sync = useSyncState();
-  if (account.mode !== "server" || !account.user) return null;
-
   return (
-    <div className="flex items-center gap-2 px-3 py-1 text-xs opacity-70" title={sync.error ?? undefined}>
+    <span className="shrink-0" title={sync.error ?? undefined}>
       {sync.status === "syncing" ? (
-        <RefreshCw className="size-3.5 shrink-0 animate-spin" aria-hidden />
+        <RefreshCw className="size-4 animate-spin opacity-70" aria-hidden />
       ) : sync.status === "error" ? (
-        <CloudAlert className="size-3.5 shrink-0 text-error" aria-hidden />
+        <CloudAlert className="size-4 text-error" aria-hidden />
       ) : (
-        <CloudCheck className="size-3.5 shrink-0" aria-hidden />
+        <CloudCheck className="size-4 opacity-70" aria-hidden />
       )}
-      <span className="min-w-0 flex-1 truncate">{account.user.email}</span>
       <span className="sr-only" role="status">
         {sync.status === "syncing" ? "Synchronisiert" : sync.status === "error" ? "Sync fehlgeschlagen" : "Synchron"}
       </span>
+    </span>
+  );
+}
+
+/** Bottom of the sidebar: who is signed in and in which role. Whoever runs the app gets the showy card. */
+function AccountBadge() {
+  const account = useAccount();
+  if (account.mode !== "server" || !account.user) return null;
+  const { email, plan } = account.user;
+  const name = account.user.name.trim() || email.split("@")[0];
+  const initial = name.charAt(0).toUpperCase();
+
+  if (plan === "admin") {
+    return (
+      <div className="admin-card flex items-center gap-3 p-3" title={email}>
+        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-white/15 text-lg font-black ring-2 ring-accent" aria-hidden>
+          {initial}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-black leading-tight">{name}</div>
+          <div className="flex items-center gap-1 text-[0.7rem] font-extrabold uppercase tracking-widest text-accent">
+            <Crown className="size-3.5" aria-hidden />
+            Admin
+          </div>
+        </div>
+        <SyncIcon />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-2 py-1" title={email}>
+      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-base-200 font-extrabold" aria-hidden>
+        {initial}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-bold leading-tight">{name}</div>
+        <div className="text-xs opacity-70">{plan === "paid" ? "Pro" : "Member"}</div>
+      </div>
+      <SyncIcon />
     </div>
   );
 }
@@ -262,7 +298,7 @@ function Shell({ children }: { children: ReactNode }) {
               <TreeNode key={folder.id} folder={folder} folders={folders} pathname={pathname} onNavigate={close} />
             ))}
           </ul>
-          <SyncStatus />
+          <AccountBadge />
           <ul className="menu w-full p-0 font-semibold">
             <li>
               <Link href="/settings" onClick={close} className={pathname === "/settings" ? "menu-active" : ""}>

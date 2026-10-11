@@ -47,7 +47,7 @@ export function ForgotPasswordForm() {
     <Frame title="Passwort vergessen">
       {sent ? (
         <p role="status" className="alert alert-success alert-soft text-sm">
-          Wenn es ein Konto mit dieser Adresse gibt, ist eine E-Mail mit einem Link unterwegs. Der Link gilt 15 Minuten.
+          Wenn es ein Konto mit dieser Adresse gibt, ist eine E-Mail mit einem Link unterwegs. Der Link gilt eine Stunde.
         </p>
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-4">

@@ -33,6 +33,25 @@ export async function currentUser(): Promise<CurrentUser | null> {
   return user ? { id: user.id, email: user.email, name: user.name } : null;
 }
 
+/**
+ * Asks Neon Auth whether this is the account's password, without touching the caller's session.
+ * Null when Neon Auth could not be reached or answered with something unexpected.
+ */
+export async function passwordMatches(email: string, password: string, origin: string): Promise<boolean | null> {
+  try {
+    const response = await fetch(`${process.env.NEON_AUTH_BASE_URL}/sign-in/email`, {
+      method: "POST",
+      // Neon Auth only answers requests that name one of the app's own origins.
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ email, password }),
+    });
+    if (response.ok) return true;
+    return response.status === 401 || response.status === 400 ? false : null;
+  } catch {
+    return null;
+  }
+}
+
 const UNAUTHORIZED = () => Response.json({ error: "Bitte melde dich an." }, { status: 401 });
 
 /** For routes that only exist in server mode. Returns the user, or the response to send instead. */
