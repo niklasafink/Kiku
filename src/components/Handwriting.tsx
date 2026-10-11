@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent } from "react";
 import { Eraser, Hand, PenLine, Trash2, Undo2 } from "lucide-react";
 import { drawInk, drawStroke, drawStrokes, hasInk, inkBottom, type InkPoint, type Stroke } from "@/lib/ink";
 
@@ -34,6 +34,11 @@ interface Drawing {
   box: { left: number; top: number; right: number; bottom: number };
 }
 
+/** Safari tells a pen from a finger when a touch begins; only then can the pen alone be kept from scrolling. */
+const knowsStylus = () => typeof Touch !== "undefined" && "touchType" in Touch.prototype;
+const isStylus = (touch: Touch) => (touch as Touch & { touchType?: string }).touchType === "stylus";
+const never = () => () => {};
+
 /** Keeps the pointer's events on the sheet while it moves; refused for pointers that are already gone. */
 function capture(element: HTMLElement, pointerId: number) {
   try {
@@ -58,8 +63,10 @@ function scrollerOf(element: HTMLElement): Element | Window {
  * does nothing. The mouse always writes; "Finger schreibt" lets a finger write too, for
  * tablets without a pen.
  *
- * The browser must not scroll by itself over the sheet (it would scroll when the pen moves
- * instead of letting it write), so scrolling with a finger is done here.
+ * On iPad the browser scrolls for the finger as it does anywhere else, and only the pen is
+ * kept from scrolling. Other browsers cannot tell the two apart in time: there the browser
+ * must not scroll over the sheet at all (it would scroll when the pen moves instead of
+ * letting it write), and scrolling with a finger is done here.
  *
  * Two layers: the finished writing, and above it the stroke being drawn. That one is painted
  * anew with every movement, because its smoothed shape changes up to the tip.
@@ -84,7 +91,12 @@ export function Handwriting({
   const scrolling = useRef<{ pointerId: number; y: number; moved: boolean; velocity: number; time: number } | null>(null);
   const momentum = useRef(0);
   const frame = useRef(0);
+  // When the pen last touched the paper. Hovering above it does not count.
   const lastPen = useRef(-Infinity);
+  // Touches of the hand that rested on the paper while the pen wrote; they never scroll.
+  const palms = useRef(new Set<number>());
+  // Whether the browser scrolls for the finger. Not while the finger writes.
+  const nativeScroll = useSyncExternalStore(never, knowsStylus, () => false) && !fingerWrites;
   // The strokes the lower layer shows, so a stroke that was just finished is not painted twice.
   const painted = useRef<Stroke[] | null>(null);
   const strokesRef = useRef(strokes);
@@ -134,21 +146,46 @@ export function Handwriting({
     [],
   );
 
-  // iPadOS takes a pen that moves over a page for one of its own gestures (Scribble, selecting
-  // text, the magnifier) and then ends the stroke halfway. Refusing the touch keeps the pen
-  // here. React listens passively, where refusing is not possible, hence by hand.
+  // iPadOS takes a pen that moves over a page for one of its own gestures (scrolling, Scribble,
+  // selecting text, the magnifier) and then ends the stroke halfway. Refusing the touch keeps
+  // the pen here. React listens passively, where refusing is not possible, hence by hand.
   useEffect(() => {
     const canvas = canvasRef.current!;
+    const writing = (time: number) => {
+      const drawing = current.current;
+      return (drawing?.type === "pen" && time - drawing.time < STALE) || time - lastPen.current < PALM_GRACE;
+    };
     const refuse = (event: TouchEvent) => {
-      if (event.cancelable) event.preventDefault();
+      if (!event.cancelable) return;
+      if (!nativeScroll) return event.preventDefault();
+      const changed = Array.from(event.changedTouches);
+      if (event.type === "touchstart") {
+        if (changed.some(isStylus)) {
+          // The hand that is on the paper already belongs to the pen.
+          for (const touch of Array.from(event.touches)) if (!isStylus(touch)) palms.current.add(touch.identifier);
+          return event.preventDefault();
+        }
+        // A touch while the pen writes or just did is the resting hand; any other finger may scroll.
+        if (!writing(event.timeStamp)) return;
+        for (const touch of changed) palms.current.add(touch.identifier);
+        return event.preventDefault();
+      }
+      if (changed.some((touch) => isStylus(touch) || palms.current.has(touch.identifier))) event.preventDefault();
+    };
+    const forget = (event: TouchEvent) => {
+      for (const touch of Array.from(event.changedTouches)) palms.current.delete(touch.identifier);
     };
     canvas.addEventListener("touchstart", refuse, { passive: false });
     canvas.addEventListener("touchmove", refuse, { passive: false });
+    canvas.addEventListener("touchend", forget);
+    canvas.addEventListener("touchcancel", forget);
     return () => {
       canvas.removeEventListener("touchstart", refuse);
       canvas.removeEventListener("touchmove", refuse);
+      canvas.removeEventListener("touchend", forget);
+      canvas.removeEventListener("touchcancel", forget);
     };
-  }, []);
+  }, [nativeScroll]);
 
   function toPoints(event: PointerEvent<HTMLCanvasElement>, samples: globalThis.PointerEvent[]): InkPoint[] {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -228,6 +265,7 @@ export function Handwriting({
     const drawing = current.current;
     const writes = type === "pen" || type === "mouse" || fingerWrites;
     if (!writes) {
+      if (nativeScroll) return;
       // A finger scrolls the page, unless the pen is on the paper or just was (the resting hand).
       if (drawing) {
         if (event.timeStamp - drawing.time < STALE) return;
@@ -264,7 +302,7 @@ export function Handwriting({
   }
 
   function handleMove(event: PointerEvent<HTMLCanvasElement>) {
-    if (event.pointerType === "pen") lastPen.current = event.timeStamp;
+    if (event.pointerType === "pen" && event.buttons !== 0) lastPen.current = event.timeStamp;
     const scroll = scrolling.current;
     if (scroll && scroll.pointerId === event.pointerId) {
       const delta = scroll.y - event.clientY;
@@ -371,7 +409,7 @@ export function Handwriting({
           ref={canvasRef}
           role="img"
           aria-label="Schreibfläche für deine handschriftliche Antwort"
-          className={`block w-full touch-none select-none ${tool === "eraser" ? "cursor-cell" : "cursor-crosshair"}`}
+          className={`block w-full select-none ${nativeScroll ? "touch-pan-y" : "touch-none"} ${tool === "eraser" ? "cursor-cell" : "cursor-crosshair"}`}
           style={{
             height,
             // Faint ruling, like a writing pad.
