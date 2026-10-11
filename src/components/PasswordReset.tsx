@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
-import { KikuMark } from "@/components/KikuMark";
+import { KikuWordmark } from "@/components/KikuWordmark";
 import { authAttempt, authClient } from "@/lib/authClient";
 
 const RESET_PATH = "/auth/reset-password";
@@ -13,8 +13,7 @@ function Frame({ title, children }: { title: string; children: React.ReactNode }
     <div className="grid min-h-dvh place-items-center bg-base-200 p-4">
       <div className="tile pop-in flex w-full max-w-sm flex-col gap-4 p-6">
         <div className="flex items-center gap-2 text-xl font-black">
-          <KikuMark className="size-9" />
-          Kiku
+          <KikuWordmark />
         </div>
         <h1 className="text-2xl font-black">{title}</h1>
         {children}

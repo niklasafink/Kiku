@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { useAccount } from "@/components/Account";
 import { GitHubIcon } from "./GitHubIcon";
 import { GITHUB_URL, HEADER_HEIGHT, WRAP } from "./shared";
-import { KikuMark } from "@/components/KikuMark";
+import { KikuWordmark } from "@/components/KikuWordmark";
 
 // Sized after remnote.com: 15px semibold links with a quiet hover tint, a compact filled button.
 const NAV_LINK = "rounded-md px-3 py-1 text-[15px] leading-tight font-semibold hover:bg-base-200";
@@ -44,8 +44,7 @@ export function WebsiteHeader() {
             scrolled ? "invisible opacity-0" : ""
           }`}
         >
-          <KikuMark className="size-8" />
-          Kiku
+          <KikuWordmark />
         </Link>
         {/* The padding is always there, pulled back by the margin, so the links do not move when the outline appears. */}
         <div

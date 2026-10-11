@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { alignSegments, scoreSegments, splitSentences } from "./grading";
+import { alignSegments, createPainter, scoreSegments, splitSentences } from "./grading";
 
 describe("alignSegments", () => {
   const solution = "Die Mitose besteht aus vier Phasen:\n- Prophase\n- Metaphase";
@@ -78,5 +78,34 @@ describe("scoreSegments", () => {
       ]),
     ).toBe(50);
     expect(scoreSegments([])).toBe(0);
+  });
+});
+
+describe("createPainter", () => {
+  it("assigns the shown text to the segments, in reading order", () => {
+    const paint = createPainter([
+      { text: "Gewerbebetrieb nach § 15 ", status: "correct" },
+      { text: "Abs. 1", status: "missing" },
+      { text: " EStG", status: "correct" },
+    ]);
+    // Shown as "Gewerbebetrieb nach **§ 15 Abs. 1** EStG": three pieces of text.
+    expect(paint("Gewerbebetrieb nach ")).toEqual([{ text: "Gewerbebetrieb nach ", segment: 0 }]);
+    expect(paint("§ 15 Abs. 1")).toEqual([
+      { text: "§ 15 ", segment: 0 },
+      { text: "Abs. 1", segment: 1 },
+    ]);
+    expect(paint(" EStG")).toEqual([{ text: " EStG", segment: 2 }]);
+  });
+
+  it("skips what only the plain text has: list markers and table dividers", () => {
+    const paint = createPainter([
+      { text: "- Prophase\n", status: "correct" },
+      { text: "- Metaphase\n", status: "missing" },
+      { text: "Phase | Dauer", status: "correct" },
+    ]);
+    expect(paint("Prophase")).toEqual([{ text: "Prophase", segment: 0 }]);
+    expect(paint("Metaphase")).toEqual([{ text: "Metaphase", segment: 1 }]);
+    expect(paint("Phase")).toEqual([{ text: "Phase", segment: 2 }]);
+    expect(paint("Dauer")).toEqual([{ text: "Dauer", segment: 2 }]);
   });
 });

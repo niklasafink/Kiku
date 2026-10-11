@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Copy } from "lucide-react";
 import { useAccount } from "@/components/Account";
-import { KikuMark } from "@/components/KikuMark";
+import { KikuWordmark } from "@/components/KikuWordmark";
 import { ImageBase, RichText } from "@/components/RichText";
 import { pluralize } from "@/lib/format";
 import { copySharedDeck, fetchSharedDeck, sharedImageBase, type SharedDeck } from "@/lib/shared";
@@ -117,7 +117,7 @@ export default function SharedDeckPage() {
     <div className="min-h-dvh bg-base-200">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6">
         <Link href="/" className="flex items-center gap-2 self-start text-xl font-black">
-          <KikuMark className="size-9" /> Kiku
+          <KikuWordmark />
         </Link>
         {body}
       </div>

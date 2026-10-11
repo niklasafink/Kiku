@@ -1,18 +1,34 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
-import { Eraser, PenLine, Trash2, Undo2 } from "lucide-react";
+import { Eraser, Hand, PenLine, Trash2, Undo2 } from "lucide-react";
 import { drawStroke, drawStrokes, hasInk, inkBottom, type Stroke } from "@/lib/ink";
 
-const START_HEIGHT = 340;
-const GROW_BY = 260;
+const START_HEIGHT = 520;
+const GROW_BY = 360;
 /** Room kept free below the writing; the sheet grows when less is left. */
-const MARGIN = 90;
-const LINE_GAP = 34;
+const MARGIN = 140;
+const LINE_GAP = 38;
+/** Ink on the paper: always dark on white, whatever the theme, like paper in GoodNotes. */
+const INK = "#1b1b24";
+
+/** Keeps the pointer's events on the sheet while it moves; refused for pointers that are already gone. */
+function capture(element: HTMLElement, pointerId: number) {
+  try {
+    element.setPointerCapture(pointerId);
+  } catch {
+    // Not fatal: the events then simply stop at the edge of the sheet.
+  }
+}
 
 /**
- * A sheet to write on with Apple Pencil, another stylus, the mouse or a finger. Once a pen
- * was used, touches are ignored, so the hand can rest on the screen while writing.
+ * A sheet of white paper to write on with Apple Pencil or another stylus. The pen writes, a
+ * finger scrolls the page (so you can move up and down while writing), and a resting palm
+ * does nothing. The mouse always writes; "Finger schreibt" lets a finger write too, for
+ * tablets without a pen.
+ *
+ * The browser must not scroll by itself over the sheet (it would scroll when the pen moves
+ * instead of letting it write), so scrolling with a finger is done here.
  */
 export function Handwriting({
   strokes,
@@ -25,10 +41,17 @@ export function Handwriting({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tool, setTool] = useState<"pen" | "eraser">("pen");
+  const [fingerWrites, setFingerWrites] = useState(false);
   const [height, setHeight] = useState(() => Math.max(START_HEIGHT, inkBottom(strokes) + MARGIN));
   // The stroke being drawn; it joins `strokes` when the pen lifts.
-  const current = useRef<{ stroke: Stroke; pointerId: number; color: string } | null>(null);
-  const penSeen = useRef(false);
+  const current = useRef<{ stroke: Stroke; pointerId: number; type: string } | null>(null);
+  // A finger that scrolls the page.
+  const scrolling = useRef<{ pointerId: number; y: number; velocity: number; time: number } | null>(null);
+  const momentum = useRef(0);
+  const strokesRef = useRef(strokes);
+  useEffect(() => {
+    strokesRef.current = strokes;
+  });
 
   const repaint = useCallback(() => {
     const canvas = canvasRef.current;
@@ -42,7 +65,7 @@ export function Handwriting({
     const context = canvas.getContext("2d")!;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
-    drawStrokes(context, strokes, getComputedStyle(canvas).color);
+    drawStrokes(context, strokes, INK);
   }, [strokes, height]);
 
   useEffect(() => {
@@ -51,6 +74,8 @@ export function Handwriting({
     observer.observe(canvasRef.current!);
     return () => observer.disconnect();
   }, [repaint]);
+
+  useEffect(() => () => cancelAnimationFrame(momentum.current), []);
 
   function pointsOf(event: PointerEvent<HTMLCanvasElement>) {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -64,34 +89,71 @@ export function Handwriting({
   }
 
   function handleDown(event: PointerEvent<HTMLCanvasElement>) {
-    if (disabled || current.current) return;
-    if (event.pointerType === "pen") penSeen.current = true;
-    else if (event.pointerType === "touch" && penSeen.current) return; // the resting hand
-    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (disabled) return;
+    const type = event.pointerType;
+    if (type === "mouse" && event.button !== 0) return;
+    cancelAnimationFrame(momentum.current);
+
+    const writes = type === "pen" || type === "mouse" || fingerWrites;
+    if (!writes) {
+      // A finger scrolls the page, unless the pen is on the paper (the resting hand).
+      if (current.current) return;
+      scrolling.current = { pointerId: event.pointerId, y: event.clientY, velocity: 0, time: event.timeStamp };
+      capture(event.currentTarget, event.pointerId);
+      return;
+    }
+    // The pen wins over everything else: a palm that was taken for a stroke is dropped.
+    if (current.current) {
+      if (type === "pen" && current.current.type !== "pen") current.current = null;
+      else return;
+    }
+    scrolling.current = null;
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    capture(event.currentTarget, event.pointerId);
     // The button on the side of a stylus and the eraser end both erase.
-    const erase = tool === "eraser" || event.buttons === 32 || (event.pointerType === "pen" && event.buttons === 2);
+    const erase = tool === "eraser" || event.buttons === 32 || (type === "pen" && event.buttons === 2);
     const stroke: Stroke = { points: pointsOf(event), ...(erase ? { erase: true } : {}) };
-    // Ink has the text colour, so it follows the light and dark theme.
-    const color = getComputedStyle(event.currentTarget).color;
-    current.current = { stroke, pointerId: event.pointerId, color };
-    drawStroke(event.currentTarget.getContext("2d")!, stroke, color);
+    current.current = { stroke, pointerId: event.pointerId, type };
+    drawStroke(event.currentTarget.getContext("2d")!, stroke, INK);
   }
 
   function handleMove(event: PointerEvent<HTMLCanvasElement>) {
+    const scroll = scrolling.current;
+    if (scroll && scroll.pointerId === event.pointerId) {
+      const delta = scroll.y - event.clientY;
+      const elapsed = Math.max(1, event.timeStamp - scroll.time);
+      scroll.velocity = delta / elapsed;
+      scroll.y = event.clientY;
+      scroll.time = event.timeStamp;
+      window.scrollBy(0, delta);
+      return;
+    }
     const drawing = current.current;
     if (!drawing || drawing.pointerId !== event.pointerId) return;
     const from = drawing.stroke.points.length;
     drawing.stroke.points.push(...pointsOf(event));
-    drawStroke(event.currentTarget.getContext("2d")!, drawing.stroke, drawing.color, from);
+    drawStroke(event.currentTarget.getContext("2d")!, drawing.stroke, INK, from);
   }
 
   function handleUp(event: PointerEvent<HTMLCanvasElement>) {
+    const scroll = scrolling.current;
+    if (scroll && scroll.pointerId === event.pointerId) {
+      scrolling.current = null;
+      // After a flick the page glides on, like a native scroll.
+      let velocity = scroll.velocity * 16;
+      const glide = () => {
+        if (Math.abs(velocity) < 0.5) return;
+        window.scrollBy(0, velocity);
+        velocity *= 0.95;
+        momentum.current = requestAnimationFrame(glide);
+      };
+      if (event.type === "pointerup") momentum.current = requestAnimationFrame(glide);
+      return;
+    }
     const drawing = current.current;
     if (!drawing || drawing.pointerId !== event.pointerId) return;
     current.current = null;
-    const next = [...strokes, drawing.stroke];
+    const next = [...strokesRef.current, drawing.stroke];
     onChange(next);
     // Keep room to write on: the sheet grows before the pen reaches its end.
     const bottom = inkBottom(next);
@@ -119,6 +181,15 @@ export function Handwriting({
         </div>
         <button
           type="button"
+          className={`btn btn-sm ${fingerWrites ? "btn-primary" : "btn-ghost"}`}
+          aria-pressed={fingerWrites}
+          onClick={() => setFingerWrites((on) => !on)}
+          title="Ohne Apple Pencil: mit dem Finger schreiben statt scrollen"
+        >
+          <Hand className="size-4" /> Finger schreibt
+        </button>
+        <button
+          type="button"
           className="btn btn-ghost btn-sm"
           onClick={() => onChange(strokes.slice(0, -1))}
           disabled={disabled || strokes.length === 0}
@@ -142,11 +213,12 @@ export function Handwriting({
           ref={canvasRef}
           role="img"
           aria-label="Schreibfläche für deine handschriftliche Antwort"
-          className={`block w-full touch-none rounded-field border-2 border-base-300 bg-base-100 text-base-content select-none ${tool === "eraser" ? "cursor-cell" : "cursor-crosshair"}`}
+          className={`block w-full touch-none rounded-field border-2 border-base-300 bg-white select-none ${tool === "eraser" ? "cursor-cell" : "cursor-crosshair"}`}
           style={{
             height,
             // Faint ruling, like a writing pad.
-            backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${LINE_GAP - 1}px, color-mix(in oklab, currentColor 10%, transparent) ${LINE_GAP - 1}px, color-mix(in oklab, currentColor 10%, transparent) ${LINE_GAP}px)`,
+            backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${LINE_GAP - 1}px, #e6e8ef ${LINE_GAP - 1}px, #e6e8ef ${LINE_GAP}px)`,
+            WebkitTouchCallout: "none",
           }}
           onPointerDown={handleDown}
           onPointerMove={handleMove}
@@ -155,8 +227,10 @@ export function Handwriting({
           onContextMenu={(event) => event.preventDefault()}
         />
         {empty && (
-          <p className="pointer-events-none absolute inset-x-0 top-1/3 text-center text-sm opacity-50">
-            Schreib deine Antwort hier, mit Apple Pencil, Stift oder Finger.
+          <p className="pointer-events-none absolute inset-x-0 top-1/4 px-4 text-center text-sm text-neutral/50">
+            Schreib mit dem Apple Pencil auf das Blatt. Mit einem Finger scrollst du.
+            <br />
+            Wenn du fertig bist, tippe auf „Fertig“: dann liest die KI deine Handschrift.
           </p>
         )}
       </div>

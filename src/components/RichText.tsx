@@ -6,7 +6,7 @@ import { imageUrl } from "@/lib/images";
 // Layout and fonts of typeset formulas.
 import "katex/dist/katex.min.css";
 import { parseOcclusion, type Occlusion } from "@/lib/occlusion";
-import { imageRefs, parseBlocks, type Inline } from "@/lib/richText";
+import { parseBlocks, type Inline } from "@/lib/richText";
 
 /**
  * Where pictures come from when the cards are not the viewer's own (a shared deck): a URL that
@@ -107,29 +107,40 @@ export function Formula({ tex, display }: { tex: string; display: boolean }) {
   return <Tag className={display ? "overflow-x-auto py-1" : ""} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-function renderInline(inlines: Inline[]): ReactNode {
+/**
+ * Lays something over a text without changing how it is set, e.g. the colours of a graded
+ * solution. Called for every piece of text in reading order; a formula comes as its source.
+ */
+export interface Overlay {
+  text: (text: string) => ReactNode;
+  formula: (tex: string, formula: ReactNode, block: boolean) => ReactNode;
+}
+
+function renderInline(inlines: Inline[], overlay?: Overlay): ReactNode {
   return inlines.map((inline, i) => {
     switch (inline.type) {
       case "text":
-        return <Fragment key={i}>{inline.text}</Fragment>;
+        return <Fragment key={i}>{overlay ? overlay.text(inline.text) : inline.text}</Fragment>;
       case "bold":
-        return <strong key={i}>{renderInline(inline.children)}</strong>;
+        return <strong key={i}>{renderInline(inline.children, overlay)}</strong>;
       case "italic":
-        return <em key={i}>{renderInline(inline.children)}</em>;
+        return <em key={i}>{renderInline(inline.children, overlay)}</em>;
       case "mark":
         return (
           <mark key={i} className="rounded-sm bg-warning/40 px-0.5 text-inherit">
-            {renderInline(inline.children)}
+            {renderInline(inline.children, overlay)}
           </mark>
         );
       case "code":
         return (
           <code key={i} className="rounded-sm bg-base-200 px-1 py-0.5 font-mono text-[0.92em]">
-            {inline.text}
+            {overlay ? overlay.text(inline.text) : inline.text}
           </code>
         );
-      case "math":
-        return <Formula key={i} tex={inline.tex} display={inline.display} />;
+      case "math": {
+        const formula = <Formula tex={inline.tex} display={inline.display} />;
+        return <Fragment key={i}>{overlay ? overlay.formula(inline.tex, formula, false) : formula}</Fragment>;
+      }
       case "image": {
         const occlusion = parseOcclusion(inline.alt);
         if (occlusion) return <OccludedImage key={i} id={inline.id} occlusion={occlusion} />;
@@ -143,7 +154,17 @@ const HEADING = { 1: "text-xl font-black", 2: "text-lg font-extrabold", 3: "font
 const INDENT = ["", "ml-5", "ml-10", "ml-[3.75rem]"];
 
 /** Renders a card text: formatting, lists, tables and pictures. Plain text looks as it always did. */
-export function RichText({ text, className = "" }: { text: string; className?: string }) {
+export function RichText({
+  text,
+  className = "",
+  overlay: createOverlay,
+}: {
+  text: string;
+  className?: string;
+  /** Called once per rendering, so an overlay that counts along the text starts at its beginning. */
+  overlay?: () => Overlay;
+}) {
+  const overlay = createOverlay?.();
   return (
     <div className={`flex flex-col gap-2.5 break-words ${className}`}>
       {parseBlocks(text).map((block, i) => {
@@ -151,13 +172,13 @@ export function RichText({ text, className = "" }: { text: string; className?: s
           case "paragraph":
             return (
               <p key={i} className="whitespace-pre-wrap">
-                {renderInline(block.inlines)}
+                {renderInline(block.inlines, overlay)}
               </p>
             );
           case "heading":
             return (
               <p key={i} role="heading" aria-level={block.level + 2} className={HEADING[block.level]}>
-                {renderInline(block.inlines)}
+                {renderInline(block.inlines, overlay)}
               </p>
             );
           case "list":
@@ -168,13 +189,15 @@ export function RichText({ text, className = "" }: { text: string; className?: s
                     <span className="shrink-0 font-bold tabular-nums opacity-60" aria-hidden={!block.ordered}>
                       {item.marker}
                     </span>
-                    <span className="min-w-0">{renderInline(item.inlines)}</span>
+                    <span className="min-w-0">{renderInline(item.inlines, overlay)}</span>
                   </li>
                 ))}
               </ul>
             );
-          case "math":
-            return <Formula key={i} tex={block.tex} display />;
+          case "math": {
+            const formula = <Formula tex={block.tex} display />;
+            return <Fragment key={i}>{overlay ? overlay.formula(block.tex, formula, true) : formula}</Fragment>;
+          }
           case "table":
             return (
               <div key={i} className="overflow-x-auto">
@@ -183,7 +206,7 @@ export function RichText({ text, className = "" }: { text: string; className?: s
                     <tr>
                       {block.header.map((cell, c) => (
                         <th key={c} className="bg-base-200 text-base-content">
-                          {renderInline(cell)}
+                          {renderInline(cell, overlay)}
                         </th>
                       ))}
                     </tr>
@@ -193,7 +216,7 @@ export function RichText({ text, className = "" }: { text: string; className?: s
                       <tr key={r}>
                         {row.map((cell, c) => (
                           <td key={c} className="align-top">
-                            {renderInline(cell)}
+                            {renderInline(cell, overlay)}
                           </td>
                         ))}
                       </tr>
@@ -203,24 +226,6 @@ export function RichText({ text, className = "" }: { text: string; className?: s
               </div>
             );
         }
-      })}
-    </div>
-  );
-}
-
-/** Only the pictures of a text, e.g. below a graded solution, which is shown as plain text. */
-export function CardImages({ text, className = "" }: { text: string; className?: string }) {
-  const images = imageRefs(text);
-  if (images.length === 0) return null;
-  return (
-    <div className={`flex flex-wrap gap-3 ${className}`}>
-      {images.map((image, i) => {
-        const occlusion = parseOcclusion(image.alt);
-        return occlusion ? (
-          <OccludedImage key={`${image.id}-${i}`} id={image.id} occlusion={occlusion} />
-        ) : (
-          <CardImage key={`${image.id}-${i}`} id={image.id} />
-        );
       })}
     </div>
   );

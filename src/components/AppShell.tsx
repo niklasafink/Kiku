@@ -4,19 +4,19 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { CalendarCheck, ChartNoAxesColumn, ChevronRight, CloudAlert, CloudCheck, Crown, Flame, House, Library, Menu, RefreshCw, Search, Settings } from "lucide-react";
+import { CalendarCheck, ChartNoAxesColumn, ChevronRight, CloudAlert, CloudCheck, Crown, Flame, House, Library, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings } from "lucide-react";
 import { AccountProvider, useAccount, useSyncState } from "@/components/Account";
 import { useAttemptLog, useFolders } from "@/lib/hooks";
 import { db } from "@/lib/db";
 import { cleanupImages } from "@/lib/images";
 import { enableOffline } from "@/lib/offline";
 import { gradePendingAnswers } from "@/lib/pendingGrades";
-import { parseOpenFolders, setFoldersOpen, useOpenFolders } from "@/lib/settings";
+import { parseOpenFolders, setFoldersOpen, setSidebarCollapsed, useOpenFolders, useSidebarCollapsed } from "@/lib/settings";
 import { showToast } from "@/lib/toast";
 import { streakOf } from "@/lib/stats";
 import { pathTo } from "@/lib/tree";
 import type { Folder } from "@/lib/types";
-import { KikuMark } from "@/components/KikuMark";
+import { KikuWordmark } from "@/components/KikuWordmark";
 import { Toasts } from "@/components/Toasts";
 
 /** Folders grouped by their parent and sorted by name, built once per change instead of once per row. */
@@ -169,10 +169,10 @@ function UpgradeBanner() {
   return (
     <Link
       href="/pricing"
-      className="block bg-primary px-4 py-1.5 pt-[max(0.375rem,env(safe-area-inset-top))] text-center text-sm font-semibold text-primary-content lg:sticky lg:top-0 lg:z-50 lg:h-8 lg:truncate"
+      className="block h-8 truncate bg-primary px-4 text-center text-sm leading-8 font-semibold text-primary-content lg:sticky lg:top-0 lg:z-50"
     >
-      Genauere KI-Auswertung und bessere Spracherkennung mit Pro, für 4,99 € im Monat oder 29 € im Jahr.{" "}
-      <span className="whitespace-nowrap underline">Jetzt upgraden</span>
+      Pro: genauere KI-Auswertung und bessere Spracherkennung, ab 4,99 € im Monat.{" "}
+      <span className="whitespace-nowrap underline">Upgraden</span>
     </Link>
   );
 }
@@ -220,6 +220,7 @@ function Shell({ children }: { children: ReactNode }) {
   const loadedFolders = useFolders();
   const folders = useMemo(() => loadedFolders ?? [], [loadedFolders]);
   const [open, setOpen] = useState(false);
+  const collapsed = useSidebarCollapsed();
   const tree = useMemo(() => groupByParent(folders), [folders]);
   const storedOpenFolders = useOpenFolders();
   const openFolders = useMemo(() => parseOpenFolders(storedOpenFolders), [storedOpenFolders]);
@@ -270,7 +271,7 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh flex-col">
     {showBanner && <UpgradeBanner />}
-    <div className="drawer flex-1 lg:drawer-open">
+    <div className={`drawer flex-1 ${collapsed ? "" : "lg:drawer-open"}`}>
       <input
         id="nav-drawer"
         type="checkbox"
@@ -278,28 +279,47 @@ function Shell({ children }: { children: ReactNode }) {
         checked={open}
         onChange={(e) => setOpen(e.target.checked)}
       />
-      <div className="drawer-content flex flex-col bg-base-200">
-        <header className="navbar sticky top-0 z-30 border-b-2 border-base-300 bg-base-100 pt-[env(safe-area-inset-top)] lg:hidden">
-          <label htmlFor="nav-drawer" className="btn btn-ghost btn-square" aria-label="Menü öffnen">
+      <div className={`drawer-content flex min-w-0 flex-col bg-base-200 ${collapsed ? "" : "lg:ml-64"}`}>
+        <header
+          className={`navbar sticky top-0 z-30 min-h-12 gap-1 border-b-2 border-base-300 bg-base-100 px-2 pt-[env(safe-area-inset-top)] ${collapsed ? "" : "lg:hidden"}`}
+        >
+          <label htmlFor="nav-drawer" className={`btn btn-ghost btn-square btn-sm ${collapsed ? "lg:hidden" : ""}`} aria-label="Menü öffnen">
             <Menu />
           </label>
+          {collapsed && (
+            <button
+              className="btn btn-ghost btn-square btn-sm max-lg:hidden"
+              aria-label="Seitenleiste einblenden"
+              title="Seitenleiste einblenden"
+              onClick={() => setSidebarCollapsed(false)}
+            >
+              <PanelLeftOpen className="size-5" />
+            </button>
+          )}
           <Link href="/" className="px-2 text-lg font-extrabold">
-            Kiku
+            <KikuWordmark />
           </Link>
         </header>
-        <main className="mx-auto w-full max-w-[110rem] flex-1 px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-6 lg:px-8">
+        <main className="mx-auto w-full max-w-[110rem] flex-1 px-4 py-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 lg:px-8">
           {children}
         </main>
       </div>
-      {/* On wide screens the banner stays pinned, so the sidebar sits below it. */}
-      <div className={`drawer-side z-40 ${showBanner ? "lg:top-8 lg:h-[calc(100dvh-2rem)]" : ""}`}>
+      {/* Pinned to the window on wide screens (fixed, not sticky: Safari on iPad moved a sticky one while scrolling). */}
+      <div className={`drawer-side z-40 lg:fixed lg:bottom-0 lg:left-0 lg:h-auto lg:w-64 lg:overscroll-contain ${showBanner ? "lg:top-8" : "lg:top-0"}`}>
         <label htmlFor="nav-drawer" aria-label="Menü schließen" className="drawer-overlay" />
         <nav className="flex min-h-full w-64 flex-col gap-2 border-r-2 border-base-300 bg-base-100 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
           <div className="mb-2 flex items-center gap-1">
             <Link href="/" onClick={close} className="mr-auto flex items-center gap-2 px-2 py-1 text-xl font-black">
-              <KikuMark className="size-9" />
-              Kiku
+              <KikuWordmark />
             </Link>
+            <button
+              className="btn btn-ghost btn-square btn-sm opacity-50 hover:opacity-100 max-lg:hidden"
+              aria-label="Seitenleiste einklappen"
+              title="Seitenleiste einklappen"
+              onClick={() => setSidebarCollapsed(true)}
+            >
+              <PanelLeftClose className="size-4" />
+            </button>
             {account.mode === "server" && (
               <Link
                 href="/home"

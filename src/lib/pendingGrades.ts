@@ -2,8 +2,10 @@
 // becomes an ordinary attempt with the time the answer was given, so the streak and the
 // schedule see it on the right day.
 import { recognizeInk } from "./ink";
+import { db } from "./db";
 import { addAttempt, deletePendingAnswer, pendingAnswers } from "./repo";
 import { toPlainText } from "./richText";
+import { pathTo } from "./tree";
 import type { PendingAnswer, Segment } from "./types";
 
 /** A failed fetch: no network, or the server could not be reached. */
@@ -19,10 +21,15 @@ async function gradeOne(entry: PendingAnswer): Promise<"graded" | "dropped" | "l
   const solution = toPlainText(entry.solutionSnapshot);
   if (!answer.trim() || !solution) return "dropped";
 
+  // The folders the card lies in tell the AI subject and topic.
+  const card = await db.cards.get(entry.cardId);
+  const context = card
+    ? pathTo(await db.folders.toArray(), card.folderId).map((folder) => folder.name).join(" › ").slice(0, 500)
+    : "";
   const response = await fetch("/api/grade", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question: toPlainText(entry.question), solution, answer }),
+    body: JSON.stringify({ question: toPlainText(entry.question), solution, answer, context }),
   });
   if (response.status === 400 || response.status === 413) return "dropped";
   // Used-up allowance, server trouble: the answer keeps waiting.

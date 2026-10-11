@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, CloudOff, Eye, GraduationCap, Headphones, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, X } from "lucide-react";
 import { useAccount } from "@/components/Account";
-import { GradedSolution } from "@/components/GradedSolution";
+import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
 import { Handwriting } from "@/components/Handwriting";
 import { Recorder } from "@/components/Recorder";
-import { CardImages, RichText } from "@/components/RichText";
+import { RichText } from "@/components/RichText";
 import { ScoreBadge, Trend, scoreTone } from "@/components/score";
 import { LiveStar } from "@/components/Tags";
 import { inDays } from "@/lib/format";
@@ -16,6 +16,8 @@ import { canSpeak, speak, stopSpeaking } from "@/lib/speak";
 import { isOffline } from "@/lib/pendingGrades";
 import { addAttempt, attemptsForCard, clearSession, latestAttempt, queuePendingAnswer, saveSession } from "@/lib/repo";
 import { toPlainText } from "@/lib/richText";
+import { useFolders } from "@/lib/hooks";
+import { pathTo } from "@/lib/tree";
 import { daysUntil, scheduleOf } from "@/lib/srs";
 import { shuffled } from "@/lib/study";
 import { showToast } from "@/lib/toast";
@@ -86,6 +88,8 @@ export function StudySession({
   const [handedIn, setHandedIn] = useState(!exam);
   const [handingIn, setHandingIn] = useState(false);
   const [explainingId, setExplainingId] = useState<string | null>(null);
+  // Lets "Abbrechen" stop a grading or hand-in that is running.
+  const abort = useRef<AbortController | null>(null);
   // Hands-free: the question is read aloud, the answer recorded and graded, the result read out, then the next card.
   const [handsFree, setHandsFree] = useState(false);
   const [listen, setListen] = useState(0);
@@ -93,6 +97,7 @@ export function StudySession({
   // Gradings left in the month, as the server reported it with the last answer.
   const [remaining, setRemaining] = useState<{ remaining: number; limit: number } | null>(null);
   const account = useAccount();
+  const folders = useFolders();
   // Free accounts dictate with the browser's speech recognition; the server only transcribes for paid ones.
   const browserDictation = account.mode === "server" && account.user?.plan === "free";
 
@@ -148,12 +153,12 @@ export function StudySession({
    * The answer to a card as text. Handwriting that was not read yet is read now and joins what
    * was typed or spoken before it. Throws if reading fails or nothing was written.
    */
-  async function answerOf(target: Card): Promise<{ answer: string; mode: InputMode }> {
+  async function answerOf(target: Card, signal?: AbortSignal): Promise<{ answer: string; mode: InputMode }> {
     const current = states[target.id] ?? EMPTY;
     const strokes = current.ink ?? [];
     if (!hasInk(strokes)) return { answer: current.answer, mode: inputModeOf(current) };
 
-    const written = await recognizeInk(strokes);
+    const written = await recognizeInk(strokes, signal);
     const answer = [current.answer.trim(), written].filter(Boolean).join(" ");
     if (!answer) throw new Error("In deiner Handschrift war kein Text zu erkennen. Schreib etwas größer oder deutlicher.");
     patch(target.id, { answer, usedPen: true, ink: [] });
@@ -177,12 +182,19 @@ export function StudySession({
   }
 
   /** Lets the AI compare one answer with the solution and stores the attempt. Throws if that fails. */
-  async function evaluate(target: Card, answer: string, inputMode: InputMode) {
+  async function evaluate(target: Card, answer: string, inputMode: InputMode, signal?: AbortSignal) {
     const response = await fetch("/api/grade", {
       method: "POST",
+      signal,
       headers: { "Content-Type": "application/json" },
       // The AI compares text; formatting is left out and pictures cannot be judged.
-      body: JSON.stringify({ question: toPlainText(target.question), solution: toPlainText(target.solution), answer }),
+      body: JSON.stringify({
+        question: toPlainText(target.question),
+        solution: toPlainText(target.solution),
+        answer,
+        // Subject and topic, so abbreviations and terms are read the way the deck means them.
+        context: pathTo(folders ?? [], target.folderId).map((folder) => folder.name).join(" › ").slice(0, 500),
+      }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
@@ -285,11 +297,15 @@ export function StudySession({
     }
     setGradingId(target.id);
     setError(null);
+    const controller = new AbortController();
+    abort.current = controller;
     try {
-      const { answer, mode: inputMode } = spoken ? { answer: spoken, mode: "voice" as const } : await answerOf(target);
-      await evaluate(target, answer, inputMode);
+      const { answer, mode: inputMode } = spoken ? { answer: spoken, mode: "voice" as const } : await answerOf(target, controller.signal);
+      await evaluate(target, answer, inputMode, controller.signal);
     } catch (e) {
-      if (isOffline(e)) {
+      if (controller.signal.aborted) {
+        // Cancelled by the user: the answer stays as it is, nothing was graded.
+      } else if (isOffline(e)) {
         await queueOffline(target, spoken);
         showToast("Du bist offline. Die Antwort ist gespeichert und wird ausgewertet, sobald du wieder online bist.");
       } else {
@@ -297,8 +313,14 @@ export function StudySession({
       }
       setHandsFree(false);
     } finally {
+      abort.current = null;
       setGradingId(null);
     }
+  }
+
+  /** Stops the grading or hand-in that is running. */
+  function cancelGrading() {
+    abort.current?.abort();
   }
 
   /**
@@ -309,17 +331,21 @@ export function StudySession({
     const open = cards.filter((c) => isAnswered(c) && !states[c.id]?.attempt && !states[c.id]?.pending && toPlainText(c.solution));
     setError(null);
     setHandingIn(true);
+    const controller = new AbortController();
+    abort.current = controller;
     let failed: string | null = null;
     let queued = 0;
     let next = 0;
     const worker = async () => {
-      while (next < open.length && failed === null) {
+      while (next < open.length && failed === null && !controller.signal.aborted) {
         const target = open[next++];
         try {
-          const { answer, mode: inputMode } = await answerOf(target);
-          await evaluate(target, answer, inputMode);
+          const { answer, mode: inputMode } = await answerOf(target, controller.signal);
+          await evaluate(target, answer, inputMode, controller.signal);
         } catch (e) {
-          if (isOffline(e)) {
+          if (controller.signal.aborted) {
+            // Cancelled: what is graded so far stays.
+          } else if (isOffline(e)) {
             await queueOffline(target);
             queued++;
           } else {
@@ -329,7 +355,9 @@ export function StudySession({
       }
     };
     await Promise.all(Array.from({ length: EXAM_PARALLEL }, worker));
+    abort.current = null;
     setHandingIn(false);
+    if (controller.signal.aborted) return;
     if (failed !== null) return setError(failed);
     setHandedIn(true);
     if (queued > 0) showToast(`Du bist offline. ${queued === 1 ? "Eine Antwort wird" : `${queued} Antworten werden`} ausgewertet, sobald du wieder online bist.`);
@@ -372,9 +400,15 @@ export function StudySession({
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2.5">
-          <button className="btn btn-chunky bg-base-100" onClick={() => go(cards.length - 1)} disabled={handingIn}>
-            <ArrowLeft className="size-4" /> Zurück
-          </button>
+          {handingIn ? (
+            <button className="btn btn-chunky bg-base-100" onClick={cancelGrading}>
+              <X className="size-4" /> Abbrechen
+            </button>
+          ) : (
+            <button className="btn btn-chunky bg-base-100" onClick={() => go(cards.length - 1)}>
+              <ArrowLeft className="size-4" /> Zurück
+            </button>
+          )}
           {error && graded > 0 && (
             <button className="btn btn-chunky bg-base-100" onClick={() => setHandedIn(true)}>
               Ergebnis ohne den Rest ansehen
@@ -473,10 +507,10 @@ export function StudySession({
   const writing = mode === "pen" && !attempt && !state.revealed && !state.pending;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <Link href={backHref} className="btn btn-ghost btn-square btn-sm" aria-label="Lernen beenden">
-          <X className="size-5" />
+        <Link href={backHref} className="btn btn-ghost btn-sm" title="Lernen abbrechen und zurück">
+          <X className="size-4" /> Abbrechen
         </Link>
         <progress className="progress progress-primary h-2.5 flex-1" value={answered} max={cards.length} aria-label="Fortschritt" />
         <div className="join">
@@ -533,10 +567,10 @@ export function StudySession({
         )}
       </div>
 
-      <div key={card.id} className={`grid items-start gap-4 ${writing ? "md:grid-cols-[1fr_2fr]" : "md:grid-cols-2"}`}>
+      <div key={card.id} className={`grid items-start gap-3 ${writing ? "md:grid-cols-[1fr_2fr]" : "md:grid-cols-2"}`}>
         {/* Left: the question, later also the score and what you answered. */}
-        <div className="flex flex-col gap-4 md:sticky md:top-4">
-          <section className="tile pop-in p-5">
+        <div className="flex flex-col gap-3 md:sticky md:top-3">
+          <section className="tile pop-in p-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className={`mr-auto ${LABEL}`}>Frage</h2>
               <LiveStar cardId={card.id} />
@@ -546,12 +580,12 @@ export function StudySession({
                 </Link>
               )}
             </div>
-            <RichText text={card.question} className="mt-1.5 text-xl font-extrabold" />
+            <RichText text={card.question} className="mt-1 text-lg font-extrabold" />
           </section>
 
           {attempt && (
             <>
-              <section className="tile pop-in flex items-center gap-4 p-5">
+              <section className="tile pop-in flex items-center gap-4 p-4">
                 <div
                   className={`radial-progress shrink-0 font-black ${RADIAL[scoreTone(attempt.score)]}`}
                   style={{ "--value": attempt.score, "--size": "4.5rem", "--thickness": "0.5rem" } as React.CSSProperties}
@@ -580,7 +614,7 @@ export function StudySession({
                   )}
                 </div>
               </section>
-              <section className="tile p-5">
+              <section className="tile p-4">
                 <h2 className={LABEL}>Deine Antwort</h2>
                 <p className="mt-1.5 whitespace-pre-wrap">{attempt.answerText}</p>
               </section>
@@ -589,12 +623,12 @@ export function StudySession({
         </div>
 
         {/* Right: answer input first, then the solution. */}
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3">
           {attempt ? (
-            <section className="tile pop-in p-5">
+            <>
+            <section className="tile pop-in p-4">
               <h2 className={`mb-1.5 ${LABEL}`}>Lösung</h2>
-              <GradedSolution segments={attempt.segments} />
-              <CardImages text={card.solution} className="mt-4" />
+              <GradedSolution segments={attempt.segments} solution={attempt.solutionSnapshot} />
               {state.explanation ? (
                 <div className="pop-in mt-4 rounded-field bg-base-200 px-4 py-3">
                   <h3 className={`mb-1.5 flex items-center gap-1.5 ${LABEL}`}>
@@ -615,8 +649,10 @@ export function StudySession({
                 )
               )}
             </section>
+            <GradeLegend segments={attempt.segments} />
+            </>
           ) : state.pending ? (
-            <section className="tile pop-in flex flex-col gap-3 p-5">
+            <section className="tile pop-in flex flex-col gap-3 p-4">
               <h2 className={`flex items-center gap-1.5 ${LABEL}`}>
                 <CloudOff className="size-3.5" aria-hidden /> Antwort gespeichert
               </h2>
@@ -627,13 +663,13 @@ export function StudySession({
               {state.answer && <p className="whitespace-pre-wrap text-sm opacity-80">{state.answer}</p>}
             </section>
           ) : state.revealed ? (
-            <section className="tile pop-in p-5">
+            <section className="tile pop-in p-4">
               <h2 className={`mb-1.5 ${LABEL}`}>Lösung</h2>
               <RichText text={card.solution} className="leading-relaxed" />
               <p className="mt-3 text-sm opacity-60">Nur angesehen, nicht gewertet.</p>
             </section>
           ) : (
-            <section className="tile flex flex-col gap-4 p-5">
+            <section className="tile flex flex-col gap-3 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className={LABEL}>Deine Antwort</h2>
                 <div className="join" role="group" aria-label="Art der Antwort">
@@ -752,9 +788,15 @@ export function StudySession({
                     </>
                   )}
                 </button>
-                <button className="btn btn-ghost" onClick={() => patch(card.id, { revealed: true })} disabled={grading}>
-                  <Eye className="size-4" /> Lösung zeigen
-                </button>
+                {grading ? (
+                  <button className="btn btn-ghost" onClick={cancelGrading}>
+                    <X className="size-4" /> Abbrechen
+                  </button>
+                ) : (
+                  <button className="btn btn-ghost" onClick={() => patch(card.id, { revealed: true })}>
+                    <Eye className="size-4" /> Lösung zeigen
+                  </button>
+                )}
               </>
             )}
           </div>

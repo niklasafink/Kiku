@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ConsentSettingsButton } from "./Analytics";
 import { WRAP } from "./shared";
 import { WebsiteHeader } from "./WebsiteHeader";
-import { KikuMark } from "@/components/KikuMark";
+import { KikuWordmark } from "@/components/KikuWordmark";
 
 // The optical-size axis renders headlines as Inter Display, the cut RemNote uses for its titles.
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], axes: ["opsz"] });
@@ -15,8 +15,7 @@ function WebsiteFooter() {
       <div className={`${WRAP} flex flex-wrap items-center gap-x-8 gap-y-3 py-8 text-sm`}>
         <span className="mr-auto flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="flex items-center gap-2 text-lg font-bold tracking-tight">
-            <KikuMark className="size-7" />
-            Kiku
+            <KikuWordmark />
           </span>
           <span className="opacity-60">© {new Date().getFullYear()} Dealzforest UG (haftungsbeschränkt)</span>
         </span>

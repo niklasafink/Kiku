@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { ArrowLeft, ArrowRight, CalendarDays, Keyboard, Mic, PenLine, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Keyboard, Mic, PenLine, Play, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { GradedSolution } from "@/components/GradedSolution";
+import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
 import { Modal } from "@/components/Modal";
 import { RichEditor } from "@/components/RichEditor";
 import { StarButton, tagCounts, TagEditor } from "@/components/Tags";
@@ -22,30 +22,83 @@ import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
 import { folderOptions } from "@/lib/tree";
 import type { Attempt, Card, Folder } from "@/lib/types";
 
+/** Pause after the last keystroke before the text is stored. */
+const AUTOSAVE_DELAY = 600;
+
+/**
+ * Both sides of the card. Every change is stored by itself shortly after typing stops, and once
+ * more when the page is left; there is nothing to press.
+ */
 function CardEditor({ card, folders }: { card: Card; folders: Folder[] }) {
   const [question, setQuestion] = useState(card.question);
   const [solution, setSolution] = useState(card.solution);
-  const dirty = question.trim() !== card.question || solution.trim() !== card.solution;
-  const valid = question.trim() && solution.trim() && question.length <= MAX_CARD_TEXT && solution.length <= MAX_CARD_TEXT;
+  // What the database holds as far as this editor knows; edits from elsewhere (sync) replace
+  // the fields only while there is nothing unsaved here.
+  const [saved, setSaved] = useState({ question: card.question, solution: card.solution });
+  const savedRef = useRef(saved);
+  const latest = useRef({ question, solution });
+  useLayoutEffect(() => {
+    latest.current = { question, solution };
+  });
+
+  const dirty = question.trim() !== saved.question || solution.trim() !== saved.solution;
+  const empty = !question.trim() || !solution.trim();
+  const tooLong = question.length > MAX_CARD_TEXT || solution.length > MAX_CARD_TEXT;
+  const valid = !empty && !tooLong;
+
+  const remember = useCallback((value: { question: string; solution: string }) => {
+    savedRef.current = value;
+    setSaved(value);
+  }, []);
+
+  useEffect(() => {
+    const was = savedRef.current;
+    const clean = latest.current.question.trim() === was.question && latest.current.solution.trim() === was.solution;
+    if (clean && (card.question !== was.question || card.solution !== was.solution)) {
+      remember({ question: card.question, solution: card.solution });
+      setQuestion(card.question);
+      setSolution(card.solution);
+    }
+  }, [card.question, card.solution, remember]);
+
+  const save = useCallback(() => {
+    const { question: q, solution: s } = latest.current;
+    if (!q.trim() || !s.trim() || q.length > MAX_CARD_TEXT || s.length > MAX_CARD_TEXT) return;
+    if (q.trim() === savedRef.current.question && s.trim() === savedRef.current.solution) return;
+    remember({ question: q.trim(), solution: s.trim() });
+    void updateCard(card.id, { question: q.trim(), solution: s.trim() });
+  }, [card.id, remember]);
+
+  useEffect(() => {
+    if (!dirty || !valid) return;
+    const timer = setTimeout(save, AUTOSAVE_DELAY);
+    return () => clearTimeout(timer);
+  }, [question, solution, dirty, valid, save]);
+
+  // Leaving the page or the tab right after typing must not lose the last words.
+  useEffect(() => {
+    const flush = () => save();
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", flush);
+      flush();
+    };
+  }, [save]);
 
   return (
-    <form
-      className="tile flex flex-col gap-4 p-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (dirty && valid) void updateCard(card.id, { question: question.trim(), solution: solution.trim() });
-      }}
-    >
+    <div className="tile flex flex-col gap-3 p-4">
       {/* Both fields grow with their text, so a long solution is fully visible while editing. */}
-      <div className="grid items-start gap-5 md:grid-cols-2">
-        <RichEditor label="Frage" value={question} onChange={setQuestion} minHeight="22rem" />
-        <RichEditor label="Deine Lösung" value={solution} onChange={setSolution} minHeight="22rem" />
+      <div className="grid items-start gap-4 md:grid-cols-2">
+        <RichEditor label="Frage" value={question} onChange={setQuestion} minHeight="16rem" />
+        <RichEditor label="Deine Lösung" value={solution} onChange={setSolution} minHeight="16rem" />
       </div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <label className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="flex items-center gap-2">
           <span className="text-sm font-bold">Ordner</span>
           <select
-            className="select"
+            className="select select-sm"
             value={card.folderId}
             onChange={(e) => void updateCard(card.id, { folderId: e.target.value })}
           >
@@ -56,14 +109,21 @@ function CardEditor({ card, folders }: { card: Card; folders: Folder[] }) {
             ))}
           </select>
         </label>
-        <div className="flex items-center gap-3">
-          {dirty && <span className="text-sm opacity-70">Ungespeicherte Änderungen</span>}
-          <button type="submit" className="btn btn-primary btn-chunky" disabled={!dirty || !valid}>
-            Speichern
-          </button>
-        </div>
+        <p role="status" className={`flex items-center gap-1.5 text-sm ${tooLong || (empty && dirty) ? "font-semibold text-error" : "opacity-70"}`}>
+          {tooLong ? (
+            "Der Text ist zu lang und wird nicht gespeichert."
+          ) : empty && dirty ? (
+            "Frage und Lösung dürfen nicht leer sein, die Änderung ist noch nicht gespeichert."
+          ) : dirty ? (
+            "Speichert …"
+          ) : (
+            <>
+              <Check className="size-4 text-success" aria-hidden /> Automatisch gespeichert
+            </>
+          )}
+        </p>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -128,7 +188,8 @@ function History({ attempts }: { attempts: Attempt[] }) {
                   </div>
                   <div>
                     <h4 className="mb-1.5 text-xs font-extrabold tracking-wide uppercase opacity-60">Lösung</h4>
-                    <GradedSolution segments={attempt.segments} />
+                    <GradedSolution segments={attempt.segments} solution={attempt.solutionSnapshot} />
+                    <GradeLegend segments={attempt.segments} className="mt-3" />
                   </div>
                 </div>
               </details>
@@ -170,33 +231,33 @@ export default function CardPage() {
   const schedule = scheduleOf(attempts);
 
   return (
-    <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-2.5">
+    <div className="flex flex-col gap-4">
+      <header className="flex flex-col gap-1.5">
         <Breadcrumbs folders={folders} folderId={card.folderId} />
-        <h1 className="line-clamp-4 text-2xl font-black break-words whitespace-pre-wrap">{toPlainText(card.question)}</h1>
-        <div className="mt-1 flex flex-wrap items-center gap-2.5">
-          <Link href={`/c/${card.id}/learn`} className="btn btn-primary btn-chunky">
+        <h1 className="sr-only">{toPlainText(card.question)}</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={`/c/${card.id}/learn`} className="btn btn-primary btn-sm">
             <Play className="size-4" fill="currentColor" /> Üben
           </Link>
           <div className="join">
             {previous ? (
-              <Link href={`/c/${previous.id}`} className="btn join-item bg-base-100" aria-label="Vorherige Karte">
+              <Link href={`/c/${previous.id}`} className="btn btn-sm join-item bg-base-100" aria-label="Vorherige Karte">
                 <ArrowLeft className="size-4" />
               </Link>
             ) : (
-              <button className="btn join-item bg-base-100" disabled aria-label="Vorherige Karte">
+              <button className="btn btn-sm join-item bg-base-100" disabled aria-label="Vorherige Karte">
                 <ArrowLeft className="size-4" />
               </button>
             )}
-            <span className="btn join-item pointer-events-none bg-base-100 font-extrabold tabular-nums">
+            <span className="btn btn-sm join-item pointer-events-none bg-base-100 font-extrabold tabular-nums">
               {position + 1} / {siblings.length}
             </span>
             {next ? (
-              <Link href={`/c/${next.id}`} className="btn join-item bg-base-100" aria-label="Nächste Karte">
+              <Link href={`/c/${next.id}`} className="btn btn-sm join-item bg-base-100" aria-label="Nächste Karte">
                 <ArrowRight className="size-4" />
               </Link>
             ) : (
-              <button className="btn join-item bg-base-100" disabled aria-label="Nächste Karte">
+              <button className="btn btn-sm join-item bg-base-100" disabled aria-label="Nächste Karte">
                 <ArrowRight className="size-4" />
               </button>
             )}
@@ -207,18 +268,14 @@ export default function CardPage() {
               Nächste Wiederholung {inDays(daysUntil(schedule.due, now))}
             </span>
           )}
-          <button className="btn btn-ghost ml-auto text-error" onClick={() => setConfirmDelete(true)}>
+          <button className="btn btn-ghost btn-sm ml-auto text-error" onClick={() => setConfirmDelete(true)}>
             <Trash2 className="size-4" /> Löschen
           </button>
         </div>
       </header>
 
-      <section aria-labelledby="edit-heading">
-        <h2 id="edit-heading" className="mb-2.5 text-xs font-extrabold tracking-wide uppercase opacity-60">
-          Karte
-        </h2>
-        {/* Re-keyed when the stored text changes, so the form picks it up; a new tag leaves unsaved typing alone. */}
-        <CardEditor key={`${card.question}\u0000${card.solution}`} card={card} folders={folders} />
+      <section aria-label="Karte">
+        <CardEditor key={card.id} card={card} folders={folders} />
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <StarButton card={card} />
           <TagEditor card={card} known={tagCounts(allCards).map((entry) => entry.tag)} />

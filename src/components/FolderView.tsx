@@ -117,7 +117,7 @@ function Mastery({ done, total, className = "" }: { done: number; total: number;
 
 /** A toolbar action shown as its icon alone; the name appears on hover and is what screen readers get. */
 function IconAction({ label, href, onClick, children }: { label: string; href?: string; onClick?: () => void; children: ReactNode }) {
-  const className = "btn btn-chunky btn-square bg-base-100";
+  const className = "btn btn-sm btn-chunky btn-square bg-base-100";
   return (
     <div className="tooltip tooltip-bottom" data-tip={label}>
       {href ? (
@@ -205,28 +205,28 @@ export function FolderView({ folderId }: { folderId: string | null }) {
   const exam = folder ? examDates(folders, now).get(folder.id) : undefined;
 
   return (
-    <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-2.5">
+    <div className="flex flex-col gap-4">
+      <header className="flex flex-col gap-1.5">
         {folder && <Breadcrumbs folders={folders} folderId={folder.parentId} />}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {folder && (
-            <span className="grid size-11 shrink-0 place-items-center rounded-box bg-base-100 text-2xl" aria-hidden>
+            <span className="text-xl" aria-hidden>
               {folder.emoji}
             </span>
           )}
-          <div className="min-w-0 flex-1">
-            <h1 className="text-2xl font-black break-words">{folder ? folder.name : "Bibliothek"}</h1>
+          <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
+            <h1 className="text-xl font-black break-words">{folder ? folder.name : "Bibliothek"}</h1>
             {scope.length > 0 && (
               <p className="text-sm opacity-70">
                 {pluralize(scope.length, "Karte", "Karten")}
                 {scope.length - practised.length > 0 && ` · ${scope.length - practised.length} neu`}
-                {average !== null && ` · Ø ${average} % beim letzten Versuch`}
+                {average !== null && ` · Ø ${average} %`}
+                {` · ${Math.round(((scope.length - weakCount) / scope.length) * 100)} % sitzen`}
               </p>
             )}
-            {scope.length > 0 && <Mastery done={scope.length - weakCount} total={scope.length} className="mt-1.5 max-w-xs" />}
             {exam !== undefined && (
               <button
-                className="mt-0.5 flex items-center gap-1.5 text-sm font-bold text-primary hover:underline"
+                className="flex items-center gap-1.5 text-sm font-bold text-primary hover:underline"
                 onClick={() => setDialog("exam")}
                 title="Prüfungstermin ändern"
               >
@@ -237,8 +237,8 @@ export function FolderView({ folderId }: { folderId: string | null }) {
           </div>
           {folder && (
             <div className="dropdown dropdown-end">
-              <button tabIndex={0} className="btn btn-ghost btn-square" aria-label="Ordner-Aktionen">
-                <MoreHorizontal />
+              <button tabIndex={0} className="btn btn-ghost btn-square btn-sm" aria-label="Ordner-Aktionen">
+                <MoreHorizontal className="size-5" />
               </button>
               <ul tabIndex={-1} className="dropdown-content menu z-10 w-52 rounded-box border-2 border-base-300 bg-base-100 p-2 font-semibold">
                 <li>
@@ -283,7 +283,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
           )}
         </div>
 
-        <div className="mt-1 flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           {todayCount > 0 && (
             <Link
               href={folder ? `/f/${folder.id}/learn?mode=due` : "/learn"}
@@ -296,7 +296,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
             </Link>
           )}
           {folder && scope.length > 0 && (
-            <Link href={`/f/${folder.id}/learn`} className={`btn btn-chunky ${todayCount > 0 ? "bg-base-100" : "btn-primary"}`}>
+            <Link href={`/f/${folder.id}/learn`} className={`btn btn-sm btn-chunky ${todayCount > 0 ? "bg-base-100" : "btn-primary"}`}>
               <Play className="size-4" fill="currentColor" />
               {todayCount > 0 ? "Alle lernen" : "Lernen"}
               <span
@@ -309,7 +309,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
           {folder && savedSession && (
             <Link
               href={`/f/${folder.id}/learn?${MODE_QUERY[savedSession.mode]}resume=1`}
-              className="btn btn-chunky bg-base-100"
+              className="btn btn-sm btn-chunky bg-base-100"
               title={savedSession.mode === "exam" ? "Unterbrochene Prüfung fortsetzen" : "Unterbrochene Lernsitzung fortsetzen"}
             >
               <History className="size-4" />
@@ -322,7 +322,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
           {folder && weakCount > 0 && weakCount < scope.length && (
             <Link
               href={`/f/${folder.id}/learn?mode=weak`}
-              className="btn btn-chunky bg-base-100"
+              className="btn btn-sm btn-chunky bg-base-100"
               title="Nur neue Karten und Karten unter 80 %"
             >
               <Target className="size-4" />
@@ -340,9 +340,9 @@ export function FolderView({ folderId }: { folderId: string | null }) {
               <MessagesSquare className="size-4" />
             </IconAction>
           )}
-          <div className="ml-auto flex flex-wrap items-center gap-2.5">
+          <div className="ml-auto flex flex-wrap items-center gap-2">
             {folder && (
-              <button className="btn btn-chunky bg-base-100" onClick={() => setDialog("card")}>
+              <button className="btn btn-sm btn-chunky bg-base-100" onClick={() => setDialog("card")}>
                 <Plus className="size-4" /> Neue Karte
               </button>
             )}
@@ -366,7 +366,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
                 <FolderPlus className="size-4" />
               </IconAction>
             ) : (
-              <button className="btn btn-chunky bg-base-100" onClick={() => setDialog("folder")}>
+              <button className="btn btn-sm btn-chunky bg-base-100" onClick={() => setDialog("folder")}>
                 <FolderPlus className="size-4" /> Neuer Ordner
               </button>
             )}

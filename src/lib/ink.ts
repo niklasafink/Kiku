@@ -115,11 +115,12 @@ export async function inkToImage(strokes: Stroke[]): Promise<Blob | null> {
 }
 
 /** Lets the AI read the writing. Returns the text; throws with a message for the user. */
-export async function recognizeInk(strokes: Stroke[]): Promise<string> {
+export async function recognizeInk(strokes: Stroke[], signal?: AbortSignal): Promise<string> {
   const image = await inkToImage(strokes);
   if (!image) return "";
   const response = await fetch("/api/read-image?kind=handwriting", {
     method: "POST",
+    signal,
     headers: { "Content-Type": image.type },
     body: image,
   });

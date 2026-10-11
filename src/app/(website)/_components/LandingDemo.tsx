@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, RotateCcw } from "lucide-react";
-import { GradedSolution } from "@/components/GradedSolution";
+import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
 import { Recorder } from "@/components/Recorder";
 import { scoreTone } from "@/components/score";
 import { DEMO_FIELDS, type DemoCard, type DemoField } from "../_lib/demoCards";
@@ -183,6 +183,7 @@ export function LandingDemo() {
             <h3 className={`mb-1.5 ${SECTION_LABEL}`}>Lösung</h3>
             <GradedSolution segments={result.segments} />
           </section>
+          <GradeLegend segments={result.segments} />
           <div className="flex flex-wrap gap-2.5">
             <button type="button" className="btn rounded-lg bg-base-100" onClick={() => open(card)}>
               <RotateCcw className="size-4" /> Nochmal

@@ -18,12 +18,12 @@ const SITE_URL = SERVER_MODE ? "https://kikucards.de" : undefined;
 
 export const metadata: Metadata = {
   metadataBase: SITE_URL ? new URL(SITE_URL) : undefined,
-  title: "Kiku",
+  title: "kiku",
   description: DESCRIPTION,
-  applicationName: "Kiku",
-  appleWebApp: { capable: true, title: "Kiku", statusBarStyle: "default" },
+  applicationName: "kiku",
+  appleWebApp: { capable: true, title: "kiku", statusBarStyle: "default" },
   // Title and description come from each page; the image is the one next to this file.
-  openGraph: { type: "website", siteName: "Kiku", locale: "de_DE", url: "/" },
+  openGraph: { type: "website", siteName: "kiku", locale: "de_DE", url: "/" },
   twitter: { card: "summary_large_image" },
 };
 

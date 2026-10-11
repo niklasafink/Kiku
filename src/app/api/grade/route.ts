@@ -13,6 +13,8 @@ const requestSchema = z.object({
   question: z.string().max(MAX_CHARS),
   solution: z.string().trim().min(1).max(MAX_CHARS),
   answer: z.string().max(MAX_ANSWER_CHARS),
+  /** The folders the card lies in, e.g. "Steuerrecht › EStG". */
+  context: z.string().max(500).optional(),
 });
 
 export async function POST(request: Request) {
@@ -23,14 +25,14 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return Response.json({ error: "Ungültige Anfrage." }, { status: 400 });
   }
-  const { question, solution, answer } = parsed.data;
+  const { question, solution, answer, context } = parsed.data;
 
   const allowance = await takeAi(plan);
   if (allowance instanceof Response) return allowance;
 
   try {
-    const options = plan === "free" ? { models: FREE_PLAN_GRADING_MODELS, thinking: false } : undefined;
-    const graded = await gradeAnswer(question, solution, answer, options);
+    const options = plan === "free" ? { models: FREE_PLAN_GRADING_MODELS, thinking: false } : {};
+    const graded = await gradeAnswer(question, solution, answer, { ...options, context });
     // The browser shows how much of the month is left once it gets scarce.
     return Response.json({ ...graded, remaining: allowance.remaining, limit: allowance.limit });
   } catch (error) {

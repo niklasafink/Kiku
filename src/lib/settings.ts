@@ -69,6 +69,21 @@ export function useTandemVoice(): TandemVoiceSetting {
   return useSyncExternalStore(subscribe, tandemVoiceSetting, () => TANDEM_VOICES[0].id);
 }
 
+const SIDEBAR_KEY = "kiku-sidebar-collapsed";
+
+/** Whether the sidebar is folded away on wide screens. */
+export function sidebarCollapsedSetting(): boolean {
+  return read(SIDEBAR_KEY) === "1";
+}
+
+export function setSidebarCollapsed(collapsed: boolean): void {
+  write(SIDEBAR_KEY, collapsed ? "1" : null);
+}
+
+export function useSidebarCollapsed(): boolean {
+  return useSyncExternalStore(subscribe, sidebarCollapsedSetting, () => false);
+}
+
 const OPEN_FOLDERS_KEY = "kiku-open-folders";
 
 /** Ids of the folders unfolded in the sidebar, as stored: a JSON list. */
