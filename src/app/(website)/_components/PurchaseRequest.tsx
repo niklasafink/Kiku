@@ -48,8 +48,7 @@ export function PurchaseRequest({ offer, email }: { offer: Offer; email: string 
           </p>
         ) : (
           <p className={LEAD}>
-            Die ersten 100 Käufer betreue ich persönlich. Ich schreibe dir an <strong>{email}</strong> und wir klären
-            alles Weitere direkt.
+            Danke für deine Anfrage. Ich schreibe dir an <strong>{email}</strong> und wir klären alles Weitere.
           </p>
         )}
 
