@@ -1,8 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent } from "react";
-import { Eraser, Hand, PenLine, Trash2, Undo2 } from "lucide-react";
-import { drawInk, drawStroke, drawStrokes, hasInk, inkBottom, type InkPoint, type Stroke } from "@/lib/ink";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from "react";
+import { Eraser, Hand, Highlighter, Lasso, PenLine, Redo2, Slash, Trash2, Undo2, type LucideIcon } from "lucide-react";
+import {
+  boxOf,
+  drawInk,
+  drawStroke,
+  drawStrokes,
+  eraserHits,
+  inkBottom,
+  movedStroke,
+  strokesInLoop,
+  type Box,
+  type InkPoint,
+  type Stroke,
+} from "@/lib/ink";
 
 /** The sheet is long from the start, some screens of paper; the window on it scrolls. */
 const START_HEIGHT = 1600;
@@ -12,6 +24,7 @@ const MARGIN = 300;
 const LINE_GAP = 38;
 /** Ink on the paper: always dark on white, whatever the theme, like paper in GoodNotes. */
 const INK = "#1b1b24";
+const SELECTION = "#4f5bd5";
 /** Largest canvas iPadOS paints; a bigger one stays blank, so a very long sheet gets coarser instead. */
 const MAX_PIXELS = 16_000_000;
 /** How far a finger moves before it scrolls: a hand that only rests on the paper stays below it. */
@@ -20,18 +33,60 @@ const SCROLL_SLOP = 8;
 const PALM_GRACE = 300;
 /** A stroke without news from its pen for this long lost its end (iPadOS swallows it at times). */
 const STALE = 1000;
-/** Space around a stroke that is wiped with it, for the width of the line. */
-const WIPE = 12;
+/** Space around what the upper layer shows that is wiped with it, for the width of the lines. */
+const WIPE = 16;
+/** Holding the pen still for this long at the end of a stroke makes the stroke a straight line. */
+const HOLD_TIME = 550;
+/** "Still" for a hand: the pen stays within this distance. */
+const HOLD_RADIUS = 5;
+/** A stroke shorter than this is a dot or a comma, not a line to straighten. */
+const HOLD_LENGTH = 24;
+/** A line this close to level or upright (as a share of its length) is made exactly so. */
+const LEVEL = 0.04;
+/** Room around the selected writing in which it can be grabbed. */
+const GRAB = 12;
+const UNDO_STEPS = 100;
 
-interface Drawing {
-  stroke: Stroke;
+type Tool = "pen" | "marker" | "line" | "eraser" | "lasso";
+const TOOLS: { tool: Tool; label: string; Icon: LucideIcon }[] = [
+  { tool: "pen", label: "Stift. Halte den Stift am Ende still, dann wird der Strich gerade", Icon: PenLine },
+  { tool: "marker", label: "Marker", Icon: Highlighter },
+  { tool: "line", label: "Gerade Linie", Icon: Slash },
+  { tool: "eraser", label: "Radierer: entfernt ganze Striche", Icon: Eraser },
+  { tool: "lasso", label: "Lasso: Geschriebenes einkreisen und verschieben", Icon: Lasso },
+];
+
+/** What a pointer on the paper is doing, from touching down to lifting. */
+interface Touching {
   pointerId: number;
   type: string;
-  /** When the pen was last heard from. */
+  /** When the pointer was last heard from. */
   time: number;
-  /** The part of the sheet the stroke was painted on while it is drawn. */
-  box: { left: number; top: number; right: number; bottom: number };
 }
+interface Drawing extends Touching {
+  kind: "draw";
+  stroke: Stroke;
+  /** A line from where the stroke began to where the pen is. */
+  straight: boolean;
+  /** Where the pen has been resting, to notice that it is held still. */
+  rest: { x: number; y: number };
+}
+interface Erasing extends Touching {
+  kind: "erase";
+  gone: Set<Stroke>;
+  at: { x: number; y: number };
+}
+interface Looping extends Touching {
+  kind: "loop";
+  path: InkPoint[];
+}
+interface Moving extends Touching {
+  kind: "move";
+  at: { x: number; y: number };
+}
+type Gesture = Drawing | Erasing | Looping | Moving;
+
+const NOTHING: Box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
 
 /** Safari tells a pen from a finger when a touch begins; only then can the pen alone be kept from scrolling. */
 const knowsStylus = () => typeof Touch !== "undefined" && "touchType" in Touch.prototype;
@@ -72,16 +127,19 @@ function scrollerOf(element: HTMLElement): Element | Window {
 /**
  * A long sheet of white paper to write on with Apple Pencil or another stylus, seen through a
  * window of fixed height. The pen writes, a finger scrolls the sheet in its window (the page
- * around it stays put), and a resting palm does nothing. The mouse always writes; "Finger schreibt" lets a finger write too, for
- * tablets without a pen.
+ * around it stays put), and a resting palm does nothing. The mouse always writes; "Finger
+ * schreibt" lets a finger write too, for tablets without a pen.
+ *
+ * Besides the pen there is a marker, a straight line, an eraser that takes whole strokes away,
+ * and a lasso that moves what it caught.
  *
  * On iPad the browser scrolls for the finger as it does anywhere else, and only the pen is
  * kept from scrolling. Other browsers cannot tell the two apart in time: there the browser
  * must not scroll over the sheet at all (it would scroll when the pen moves instead of
  * letting it write), and scrolling with a finger is done here.
  *
- * Two layers: the finished writing, and above it the stroke being drawn. That one is painted
- * anew with every movement, because its smoothed shape changes up to the tip.
+ * Two layers: the finished writing, and above it what is in the making (the stroke being
+ * drawn, the lasso, the writing being moved). That one is painted anew with every movement.
  */
 export function Handwriting({
   strokes,
@@ -95,15 +153,24 @@ export function Handwriting({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
   const windowRef = useRef<HTMLDivElement>(null);
-  const [tool, setTool] = useState<"pen" | "eraser">("pen");
+  const [tool, setTool] = useState<Tool>("pen");
   const [fingerWrites, setFingerWrites] = useState(false);
   const [height, setHeight] = useState(() => Math.max(START_HEIGHT, inkBottom(strokes) + MARGIN));
-  // The stroke being drawn; it joins `strokes` when the pen lifts.
-  const current = useRef<Drawing | null>(null);
+  // The sheet as it was before each change, and as it was before each change that was taken back.
+  const [history, setHistory] = useState<{ past: Stroke[][]; future: Stroke[][] }>({ past: [], future: [] });
+  // What the lasso caught. It counts only while all of it is still on the sheet.
+  const [caught, setCaught] = useState<Stroke[] | null>(null);
+  const selection = useMemo(() => (caught?.length && caught.every((stroke) => strokes.includes(stroke)) ? caught : null), [caught, strokes]);
+  // The finished writing as the lower layer shows it: what is selected lies on the upper one.
+  const shown = useMemo(() => (selection ? strokes.filter((stroke) => !selection.includes(stroke)) : strokes), [strokes, selection]);
+  const gesture = useRef<Gesture | null>(null);
+  // How far the selected writing has been dragged from where it lies.
+  const offset = useRef({ x: 0, y: 0 });
   // A finger that scrolls the page.
   const scrolling = useRef<{ pointerId: number; y: number; moved: boolean; velocity: number; time: number } | null>(null);
   const momentum = useRef(0);
   const frame = useRef(0);
+  const hold = useRef<ReturnType<typeof setTimeout>>(undefined);
   // When the pen last touched the paper. Hovering above it does not count.
   const lastPen = useRef(-Infinity);
   // Touches of the hand that rested on the paper while the pen wrote; they never scroll.
@@ -112,9 +179,13 @@ export function Handwriting({
   const nativeScroll = useSyncExternalStore(never, knowsStylus, () => false) && !fingerWrites;
   // The strokes the lower layer shows, so a stroke that was just finished is not painted twice.
   const painted = useRef<Stroke[] | null>(null);
+  // The part of the upper layer that is painted on.
+  const liveBox = useRef<Box>(NOTHING);
   const strokesRef = useRef(strokes);
+  const selectionRef = useRef(selection);
   useEffect(() => {
     strokesRef.current = strokes;
+    selectionRef.current = selection;
   });
 
   /** The layer's drawing context, scaled so one unit is one CSS pixel. */
@@ -124,6 +195,14 @@ export function Handwriting({
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     return context;
   };
+
+  /** Paints the lower layer anew. */
+  const paintBase = useCallback((list: Stroke[]) => {
+    const canvas = canvasRef.current!;
+    const context = contextOf(canvas);
+    context.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    drawStrokes(context, list, INK);
+  }, []);
 
   const repaint = useCallback(() => {
     const canvas = canvasRef.current;
@@ -137,24 +216,73 @@ export function Handwriting({
         layer.width = Math.round(width * ratio);
         layer.height = Math.round(height * ratio);
       }
-    } else if (painted.current === strokes) return;
-    const context = contextOf(canvas);
-    context.clearRect(0, 0, width, height);
-    drawStrokes(context, strokes, INK);
-    painted.current = strokes;
-  }, [strokes, height]);
+      liveBox.current = NOTHING;
+    } else if (painted.current === shown) return;
+    paintBase(shown);
+    painted.current = shown;
+  }, [shown, height, paintBase]);
+
+  /** Paints what is in the making on the upper layer, at most once per frame of the screen. */
+  const paintLive = useCallback(() => {
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => {
+      const live = liveRef.current;
+      if (!live || live.clientWidth === 0) return;
+      const context = contextOf(live);
+      const old = liveBox.current;
+      if (old.right >= old.left) context.clearRect(old.left - WIPE, old.top - WIPE, old.right - old.left + WIPE * 2, old.bottom - old.top + WIPE * 2);
+      liveBox.current = NOTHING;
+
+      const dashed = () => {
+        context.strokeStyle = SELECTION;
+        context.lineWidth = 1.5;
+        context.setLineDash([6, 5]);
+      };
+      const active = gesture.current;
+      const selected = selectionRef.current;
+      if (active?.kind === "draw") {
+        const { stroke } = active;
+        if (stroke.highlight) drawStroke(context, stroke, INK);
+        else drawInk(context, stroke.points, INK, active.straight);
+        liveBox.current = boxOf([{ points: stroke.points }]);
+      } else if (active?.kind === "loop") {
+        context.save();
+        dashed();
+        context.beginPath();
+        active.path.forEach((point, i) => (i ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y)));
+        context.stroke();
+        context.restore();
+        liveBox.current = boxOf([{ points: active.path }]);
+      } else if (selected) {
+        const { x, y } = offset.current;
+        const box = boxOf(selected);
+        context.save();
+        context.translate(x, y);
+        drawStrokes(context, selected, INK);
+        dashed();
+        context.strokeRect(box.left - GRAB, box.top - GRAB, box.right - box.left + GRAB * 2, box.bottom - box.top + GRAB * 2);
+        context.restore();
+        liveBox.current = { left: box.left + x - GRAB, top: box.top + y - GRAB, right: box.right + x + GRAB, bottom: box.bottom + y + GRAB };
+      }
+    });
+  }, []);
 
   useEffect(() => {
     repaint();
-    const observer = new ResizeObserver(repaint);
+    paintLive();
+    const observer = new ResizeObserver(() => {
+      repaint();
+      paintLive();
+    });
     observer.observe(canvasRef.current!);
     return () => observer.disconnect();
-  }, [repaint]);
+  }, [repaint, paintLive]);
 
   useEffect(
     () => () => {
       cancelAnimationFrame(momentum.current);
       cancelAnimationFrame(frame.current);
+      clearTimeout(hold.current);
     },
     [],
   );
@@ -165,8 +293,8 @@ export function Handwriting({
   useEffect(() => {
     const canvas = canvasRef.current!;
     const writing = (time: number) => {
-      const drawing = current.current;
-      return (drawing?.type === "pen" && time - drawing.time < STALE) || time - lastPen.current < PALM_GRACE;
+      const active = gesture.current;
+      return (active?.type === "pen" && time - active.time < STALE) || time - lastPen.current < PALM_GRACE;
     };
     const refuse = (event: TouchEvent) => {
       if (!event.cancelable) return;
@@ -216,42 +344,10 @@ export function Handwriting({
     return toPoints(event, samples.length > 0 ? samples : [event.nativeEvent]);
   }
 
-  function wipeLive(drawing: Drawing) {
-    const { box } = drawing;
-    if (box.right < box.left) return;
-    contextOf(liveRef.current!).clearRect(box.left - WIPE, box.top - WIPE, box.right - box.left + WIPE * 2, box.bottom - box.top + WIPE * 2);
-  }
-
-  /** Paints the stroke being drawn on the upper layer, at most once per frame of the screen. */
-  function paintLive() {
-    cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(() => {
-      const drawing = current.current;
-      if (!drawing || drawing.stroke.erase) return;
-      wipeLive(drawing);
-      const { points } = drawing.stroke;
-      for (const point of points) {
-        drawing.box.left = Math.min(drawing.box.left, point.x);
-        drawing.box.top = Math.min(drawing.box.top, point.y);
-        drawing.box.right = Math.max(drawing.box.right, point.x);
-        drawing.box.bottom = Math.max(drawing.box.bottom, point.y);
-      }
-      drawInk(contextOf(liveRef.current!), points, INK, false);
-    });
-  }
-
-  /** The pen lifted: the stroke moves from the upper layer to the writing below. */
-  function finish(drawing: Drawing) {
-    current.current = null;
-    cancelAnimationFrame(frame.current);
-    settlePressure(drawing.stroke.points, 0.5);
-    const next = [...strokesRef.current, drawing.stroke];
-    if (!drawing.stroke.erase) {
-      wipeLive(drawing);
-      drawStroke(contextOf(canvasRef.current!), drawing.stroke, INK);
-    }
-    // Both kinds are on the lower layer now, so it need not be painted again as a whole.
-    if (painted.current === strokesRef.current) painted.current = next;
+  /** Puts a changed sheet in place of the current one; the current one can be had back with undo. */
+  function commit(next: Stroke[]) {
+    const before = strokesRef.current;
+    setHistory(({ past }) => ({ past: [...past, before].slice(-UNDO_STEPS), future: [] }));
     strokesRef.current = next;
     onChange(next);
     // Keep room to write on: the sheet grows before the pen reaches its end.
@@ -259,15 +355,100 @@ export function Handwriting({
     if (bottom > height - MARGIN) setHeight(bottom + GROW_BY);
   }
 
-  /** Drops a stroke that turned out to be the palm. */
-  function discard(drawing: Drawing) {
-    current.current = null;
-    cancelAnimationFrame(frame.current);
-    if (drawing.stroke.erase) {
-      // What it erased is gone from the lower layer; bring it back.
+  function undo() {
+    // An answer from an earlier visit comes without its history; then the last stroke goes.
+    const previous = history.past.at(-1) ?? strokes.slice(0, -1);
+    setHistory(({ past, future }) => ({ past: past.slice(0, -1), future: [...future, strokes] }));
+    setCaught(null);
+    onChange(previous);
+  }
+
+  function redo() {
+    const next = history.future.at(-1);
+    if (!next) return;
+    setHistory(({ past, future }) => ({ past: [...past, strokes], future: future.slice(0, -1) }));
+    setCaught(null);
+    onChange(next);
+  }
+
+  function choose(next: Tool) {
+    setTool(next);
+    setCaught(null);
+    offset.current = { x: 0, y: 0 };
+  }
+
+  /** The stroke becomes a line from where it began to where the pen is. */
+  function straighten(drawing: Drawing, to: InkPoint) {
+    const from = drawing.stroke.points[0];
+    const end = { ...to, pressure: 0.5 };
+    // A line that is nearly level or upright is meant to be: underlining, a table, a fraction bar.
+    const length = Math.hypot(end.x - from.x, end.y - from.y);
+    if (Math.abs(end.y - from.y) < length * LEVEL) end.y = from.y;
+    else if (Math.abs(end.x - from.x) < length * LEVEL) end.x = from.x;
+    drawing.straight = true;
+    drawing.stroke.points = [{ ...from, pressure: 0.5 }, end];
+  }
+
+  /** Starts the wait for a pen that is held still; every real movement starts it anew. */
+  function watchHold(drawing: Drawing) {
+    clearTimeout(hold.current);
+    hold.current = setTimeout(() => {
+      const { points } = drawing.stroke;
+      const last = points[points.length - 1];
+      if (gesture.current !== drawing || drawing.straight) return;
+      if (Math.hypot(last.x - points[0].x, last.y - points[0].y) < HOLD_LENGTH) return;
+      straighten(drawing, last);
+      paintLive();
+    }, HOLD_TIME);
+  }
+
+  /** The pointer lifted: what it was doing takes effect. */
+  function finish(active: Gesture) {
+    gesture.current = null;
+    clearTimeout(hold.current);
+    if (active.kind === "draw") {
+      const { stroke } = active;
+      settlePressure(stroke.points, 0.5);
+      const next = [...strokesRef.current, stroke];
+      // Writing goes on top of the lower layer as it is. The marker belongs below the writing,
+      // so with it the layer is painted anew.
+      if (!stroke.highlight && painted.current === strokesRef.current) {
+        drawStroke(contextOf(canvasRef.current!), stroke, INK);
+        painted.current = next;
+      }
+      commit(next);
+    } else if (active.kind === "erase") {
+      if (active.gone.size > 0) commit(strokesRef.current.filter((stroke) => !active.gone.has(stroke)));
+    } else if (active.kind === "loop") {
+      const found = strokesInLoop(strokesRef.current, active.path);
+      offset.current = { x: 0, y: 0 };
+      selectionRef.current = found.length > 0 ? found : null;
+      setCaught(selectionRef.current);
+    } else {
+      const selected = selectionRef.current;
+      const { x, y } = offset.current;
+      offset.current = { x: 0, y: 0 };
+      if (selected && (x !== 0 || y !== 0)) {
+        const moved = new Map(selected.map((stroke) => [stroke, movedStroke(stroke, x, y)]));
+        selectionRef.current = [...moved.values()];
+        setCaught(selectionRef.current);
+        commit(strokesRef.current.map((stroke) => moved.get(stroke) ?? stroke));
+      }
+    }
+    paintLive();
+  }
+
+  /** Drops what a pointer was doing that turned out to be the palm. */
+  function discard(active: Gesture) {
+    gesture.current = null;
+    clearTimeout(hold.current);
+    if (active.kind === "erase") {
+      // What it took away is gone from the lower layer; bring it back.
       painted.current = null;
       repaint();
-    } else wipeLive(drawing);
+    }
+    if (active.kind === "move") offset.current = { x: 0, y: 0 };
+    paintLive();
   }
 
   function handleDown(event: PointerEvent<HTMLCanvasElement>) {
@@ -277,42 +458,70 @@ export function Handwriting({
     cancelAnimationFrame(momentum.current);
     if (type === "pen") lastPen.current = event.timeStamp;
 
-    const drawing = current.current;
+    const active = gesture.current;
     const writes = type === "pen" || type === "mouse" || fingerWrites;
     if (!writes) {
       if (nativeScroll) return;
       // A finger scrolls the page, unless the pen is on the paper or just was (the resting hand).
-      if (drawing) {
-        if (event.timeStamp - drawing.time < STALE) return;
-        finish(drawing);
+      if (active) {
+        if (event.timeStamp - active.time < STALE) return;
+        finish(active);
       }
       if (event.timeStamp - lastPen.current < PALM_GRACE) return;
       scrolling.current = { pointerId: event.pointerId, y: event.clientY, moved: false, velocity: 0, time: event.timeStamp };
       capture(event.currentTarget, event.pointerId);
       return;
     }
-    if (drawing) {
+    if (active) {
       // A pen that comes down while its last stroke is still open: the lift got lost. Keep what was written.
-      if (type === "pen" && drawing.type === "pen") finish(drawing);
+      if (type === "pen" && active.type === "pen") finish(active);
       // The pen wins over everything else: a palm that was taken for a stroke is dropped.
-      else if (type === "pen") discard(drawing);
+      else if (type === "pen") discard(active);
       else return;
     }
     scrolling.current = null;
     event.preventDefault();
     capture(event.currentTarget, event.pointerId);
+    const touching = { pointerId: event.pointerId, type, time: event.timeStamp };
+    const points = pointsOf(event);
+    const [at] = points;
     // The button on the side of a stylus and the eraser end both erase.
-    const erase = tool === "eraser" || event.buttons === 32 || (type === "pen" && event.buttons === 2);
-    const stroke: Stroke = { points: pointsOf(event), ...(erase ? { erase: true } : {}) };
-    current.current = {
-      stroke,
-      pointerId: event.pointerId,
-      type,
-      time: event.timeStamp,
-      box: { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
-    };
-    if (erase) drawStroke(contextOf(event.currentTarget), stroke, INK);
-    else paintLive();
+    if (tool === "eraser" || event.buttons === 32 || (type === "pen" && event.buttons === 2)) {
+      const erasing: Erasing = { ...touching, kind: "erase", gone: new Set(), at };
+      gesture.current = erasing;
+      erase(erasing, at);
+    } else if (tool === "lasso") {
+      const selected = selectionRef.current;
+      const box = selected && boxOf(selected);
+      const grabbed = box && at.x >= box.left - GRAB && at.x <= box.right + GRAB && at.y >= box.top - GRAB && at.y <= box.bottom + GRAB;
+      if (grabbed) gesture.current = { ...touching, kind: "move", at };
+      else {
+        selectionRef.current = null;
+        setCaught(null);
+        gesture.current = { ...touching, kind: "loop", path: points };
+      }
+    } else {
+      const stroke: Stroke = { points, ...(tool === "marker" ? { highlight: true } : {}) };
+      const drawing: Drawing = { ...touching, kind: "draw", stroke, straight: false, rest: at };
+      gesture.current = drawing;
+      if (tool === "line") straighten(drawing, at);
+      else watchHold(drawing);
+    }
+    paintLive();
+  }
+
+  /** Takes away the strokes the eraser touches on its way to `to`. */
+  function erase(erasing: Erasing, to: { x: number; y: number }) {
+    let hit = false;
+    for (const stroke of strokesRef.current) {
+      if (erasing.gone.has(stroke) || !eraserHits(stroke, erasing.at, to)) continue;
+      erasing.gone.add(stroke);
+      hit = true;
+    }
+    erasing.at = to;
+    if (!hit) return;
+    paintBase(strokesRef.current.filter((stroke) => !erasing.gone.has(stroke)));
+    painted.current = null;
   }
 
   function handleMove(event: PointerEvent<HTMLCanvasElement>) {
@@ -332,16 +541,35 @@ export function Handwriting({
       scroll.time = event.timeStamp;
       return;
     }
-    const drawing = current.current;
-    if (!drawing || drawing.pointerId !== event.pointerId) return;
-    drawing.time = event.timeStamp;
-    const from = drawing.stroke.points.length;
-    drawing.stroke.points.push(...pointsOf(event));
-    if (drawing.stroke.erase) {
-      drawStroke(contextOf(event.currentTarget), drawing.stroke, INK, from);
+    const active = gesture.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    active.time = event.timeStamp;
+    const points = pointsOf(event);
+    const last = points[points.length - 1];
+    if (active.kind === "erase") {
+      for (const point of points) erase(active, point);
       return;
     }
-    settlePressure(drawing.stroke.points);
+    if (active.kind === "loop") active.path.push(...points);
+    else if (active.kind === "move") {
+      const selected = selectionRef.current;
+      if (!selected) return;
+      // The writing stays on the sheet: not past its left, right or upper edge.
+      const box = boxOf(selected);
+      const width = event.currentTarget.clientWidth;
+      const x = offset.current.x + last.x - active.at.x;
+      const y = offset.current.y + last.y - active.at.y;
+      offset.current = { x: Math.max(-box.left, Math.min(width - box.right, x)), y: Math.max(-box.top, y) };
+      active.at = last;
+    } else if (active.straight) straighten(active, last);
+    else {
+      active.stroke.points.push(...points);
+      settlePressure(active.stroke.points);
+      if (Math.hypot(last.x - active.rest.x, last.y - active.rest.y) > HOLD_RADIUS) {
+        active.rest = last;
+        watchHold(active);
+      }
+    }
     paintLive();
   }
 
@@ -363,60 +591,88 @@ export function Handwriting({
       momentum.current = requestAnimationFrame(glide);
       return;
     }
-    const drawing = current.current;
-    if (!drawing || drawing.pointerId !== event.pointerId) return;
+    const active = gesture.current;
+    if (!active || active.pointerId !== event.pointerId) return;
     // Also when the browser took the pen away (pointercancel): what was written so far is kept.
-    finish(drawing);
+    finish(active);
   }
 
-  const empty = !hasInk(strokes);
-  const toolButton = (active: boolean) => `btn btn-sm join-item ${active ? "btn-primary" : "bg-base-100"}`;
+  const empty = strokes.length === 0;
+  const canUndo = history.past.length > 0 || strokes.length > 0;
+  const iconButton = (active = false) => `btn btn-sm btn-square ${active ? "btn-primary" : "btn-ghost"}`;
+  const cursor = tool === "eraser" ? "cursor-cell" : tool === "lasso" ? (selection ? "cursor-move" : "cursor-crosshair") : "cursor-crosshair";
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <div className="join" role="group" aria-label="Werkzeug">
-          <button type="button" className={toolButton(tool === "pen")} aria-pressed={tool === "pen"} onClick={() => setTool("pen")}>
-            <PenLine className="size-4" /> Stift
+          {TOOLS.map(({ tool: option, label, Icon }) => (
+            <button
+              key={option}
+              type="button"
+              className={`btn btn-sm btn-square join-item ${tool === option ? "btn-primary" : "bg-base-100"}`}
+              aria-pressed={tool === option}
+              aria-label={label}
+              title={label}
+              onClick={() => choose(option)}
+            >
+              <Icon className="size-4" />
+            </button>
+          ))}
+        </div>
+        <div className="flex">
+          <button type="button" className={iconButton()} onClick={undo} disabled={disabled || !canUndo} aria-label="Rückgängig" title="Rückgängig">
+            <Undo2 className="size-4" />
           </button>
           <button
             type="button"
-            className={toolButton(tool === "eraser")}
-            aria-pressed={tool === "eraser"}
-            onClick={() => setTool("eraser")}
+            className={iconButton()}
+            onClick={redo}
+            disabled={disabled || history.future.length === 0}
+            aria-label="Wiederholen"
+            title="Wiederholen"
           >
-            <Eraser className="size-4" /> Radierer
+            <Redo2 className="size-4" />
           </button>
         </div>
         <button
           type="button"
-          className={`btn btn-sm ${fingerWrites ? "btn-primary" : "btn-ghost"}`}
+          className={iconButton(fingerWrites)}
           aria-pressed={fingerWrites}
           onClick={() => setFingerWrites((on) => !on)}
+          aria-label="Finger schreibt"
           title="Ohne Apple Pencil: mit dem Finger schreiben statt scrollen"
         >
-          <Hand className="size-4" /> Finger schreibt
+          <Hand className="size-4" />
         </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={() => onChange(strokes.slice(0, -1))}
-          disabled={disabled || strokes.length === 0}
-        >
-          <Undo2 className="size-4" /> Rückgängig
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm ml-auto"
-          onClick={() => {
-            onChange([]);
-            setHeight(START_HEIGHT);
-            windowRef.current?.scrollTo(0, 0);
-          }}
-          disabled={disabled || strokes.length === 0}
-        >
-          <Trash2 className="size-4" /> Leeren
-        </button>
+        {selection ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm ml-auto"
+            onClick={() => {
+              commit(strokes.filter((stroke) => !selection.includes(stroke)));
+              setCaught(null);
+            }}
+            disabled={disabled}
+          >
+            <Trash2 className="size-4" /> Auswahl löschen
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={`${iconButton()} ml-auto`}
+            onClick={() => {
+              commit([]);
+              setHeight(START_HEIGHT);
+              windowRef.current?.scrollTo(0, 0);
+            }}
+            disabled={disabled || empty}
+            aria-label="Blatt leeren"
+            title="Blatt leeren"
+          >
+            <Trash2 className="size-4" />
+          </button>
+        )}
       </div>
       {/* A window on the long sheet: it scrolls in here, the page around it stays where it is. */}
       <div
@@ -428,7 +684,7 @@ export function Handwriting({
           ref={canvasRef}
           role="img"
           aria-label="Schreibfläche für deine handschriftliche Antwort"
-          className={`block w-full select-none ${nativeScroll ? "touch-pan-y" : "touch-none"} ${tool === "eraser" ? "cursor-cell" : "cursor-crosshair"}`}
+          className={`block w-full select-none ${nativeScroll ? "touch-pan-y" : "touch-none"} ${cursor}`}
           style={{
             height,
             // Faint ruling, like a writing pad.

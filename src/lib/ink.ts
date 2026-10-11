@@ -13,13 +13,24 @@ export interface InkPoint {
 
 export interface Stroke {
   points: InkPoint[];
-  /** Erasing is a stroke too, so undo treats both alike. */
+  /** A stroke that rubbed out what lay under it. Only in older answers: the eraser now takes whole strokes away. */
   erase?: boolean;
+  /** A marker stroke: wide, see-through and below the writing. */
+  highlight?: boolean;
+}
+
+export interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 }
 
 /** Width of the line at medium pressure; pressing harder or lighter makes it up to half as wide again or less. */
 const PEN_WIDTH = 3;
 const ERASER_WIDTH = 22;
+const HIGHLIGHT_WIDTH = 18;
+const HIGHLIGHT = "rgba(255, 221, 51, 0.5)";
 
 /**
  * The shape of a pen stroke: an outline around the smoothed line, as wide as the pressure at
@@ -60,38 +71,133 @@ export function drawInk(context: CanvasRenderingContext2D, points: InkPoint[], c
   context.restore();
 }
 
-/** Paints one stroke; `from` paints only the newest part of an erasing stroke while it is being drawn. */
-export function drawStroke(context: CanvasRenderingContext2D, stroke: Stroke, color: string, from = 0): void {
-  const { points } = stroke;
-  if (points.length === 0) return;
-  if (!stroke.erase) {
-    drawInk(context, points, color);
-    return;
-  }
+/** One line of even width through the points: the marker, and the rubbing out of older answers. */
+function drawBand(context: CanvasRenderingContext2D, points: InkPoint[], width: number, color: string, rubOut = false): void {
   context.save();
   context.lineCap = "round";
   context.lineJoin = "round";
-  context.lineWidth = ERASER_WIDTH;
-  context.globalCompositeOperation = "destination-out";
-  if (points.length === 1) {
-    context.beginPath();
-    context.arc(points[0].x, points[0].y, ERASER_WIDTH / 2, 0, Math.PI * 2);
-    context.fill();
-  }
+  context.lineWidth = width;
+  context.strokeStyle = color;
+  if (rubOut) context.globalCompositeOperation = "destination-out";
   context.beginPath();
-  context.moveTo(points[Math.max(1, from) - 1].x, points[Math.max(1, from) - 1].y);
-  for (let i = Math.max(1, from); i < points.length; i++) context.lineTo(points[i].x, points[i].y);
+  context.moveTo(points[0].x, points[0].y);
+  // As one path, so the see-through marker does not get darker where the line crosses itself.
+  for (let i = 1; i < points.length - 1; i++) {
+    context.quadraticCurveTo(points[i].x, points[i].y, (points[i].x + points[i + 1].x) / 2, (points[i].y + points[i + 1].y) / 2);
+  }
+  const last = points[points.length - 1];
+  context.lineTo(last.x, last.y);
   context.stroke();
   context.restore();
 }
 
-export function drawStrokes(context: CanvasRenderingContext2D, strokes: Stroke[], color: string): void {
-  for (const stroke of strokes) drawStroke(context, stroke, color);
+/** Paints one stroke. */
+export function drawStroke(context: CanvasRenderingContext2D, stroke: Stroke, color: string): void {
+  const { points } = stroke;
+  if (points.length === 0) return;
+  if (stroke.erase) drawBand(context, points, ERASER_WIDTH, "#000", true);
+  else if (stroke.highlight) drawBand(context, points, HIGHLIGHT_WIDTH, HIGHLIGHT);
+  else drawInk(context, points, color);
 }
 
-/** True if something is written, i.e. not everything was erased again by clearing. */
+/** Paints the strokes, the marker first so the writing stays dark on top of it. */
+export function drawStrokes(context: CanvasRenderingContext2D, strokes: Stroke[], color: string): void {
+  for (const stroke of strokes) if (stroke.highlight) drawStroke(context, stroke, color);
+  for (const stroke of strokes) if (!stroke.highlight) drawStroke(context, stroke, color);
+}
+
+/** True if something is written: marking alone is no answer, and neither is what was rubbed out. */
 export function hasInk(strokes: Stroke[] | undefined): boolean {
-  return Boolean(strokes?.some((stroke) => !stroke.erase && stroke.points.length > 0));
+  return Boolean(strokes?.some((stroke) => !stroke.erase && !stroke.highlight && stroke.points.length > 0));
+}
+
+const boxes = new WeakMap<Stroke, Box>();
+
+/** The part of the sheet a stroke lies on. A finished stroke is never changed, so this is worked out once. */
+export function strokeBox(stroke: Stroke): Box {
+  let box = boxes.get(stroke);
+  if (!box) {
+    box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+    for (const point of stroke.points) {
+      box.left = Math.min(box.left, point.x);
+      box.top = Math.min(box.top, point.y);
+      box.right = Math.max(box.right, point.x);
+      box.bottom = Math.max(box.bottom, point.y);
+    }
+    boxes.set(stroke, box);
+  }
+  return box;
+}
+
+/** The box around several strokes. */
+export function boxOf(strokes: Stroke[]): Box {
+  const all = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+  for (const stroke of strokes) {
+    const box = strokeBox(stroke);
+    all.left = Math.min(all.left, box.left);
+    all.top = Math.min(all.top, box.top);
+    all.right = Math.max(all.right, box.right);
+    all.bottom = Math.max(all.bottom, box.bottom);
+  }
+  return all;
+}
+
+type Spot = { x: number; y: number };
+
+function distanceToSegment(p: Spot, a: Spot, b: Spot): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = dx * dx + dy * dy;
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length));
+  return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+}
+
+const side = (a: Spot, b: Spot, c: Spot) => Math.sign((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+
+function segmentDistance(a: Spot, b: Spot, c: Spot, d: Spot): number {
+  if (side(a, b, c) !== side(a, b, d) && side(c, d, a) !== side(c, d, b)) return 0;
+  return Math.min(distanceToSegment(a, c, d), distanceToSegment(b, c, d), distanceToSegment(c, a, b), distanceToSegment(d, a, b));
+}
+
+/** How far the eraser reaches around its tip. */
+const ERASER_REACH = 9;
+
+/** True if the eraser, moved from `from` to `to`, touches the stroke. */
+export function eraserHits(stroke: Stroke, from: Spot, to: Spot): boolean {
+  if (stroke.erase || stroke.points.length === 0) return false;
+  const reach = ERASER_REACH + (stroke.highlight ? HIGHLIGHT_WIDTH : PEN_WIDTH) / 2;
+  const box = strokeBox(stroke);
+  if (Math.max(from.x, to.x) < box.left - reach || Math.min(from.x, to.x) > box.right + reach) return false;
+  if (Math.max(from.y, to.y) < box.top - reach || Math.min(from.y, to.y) > box.bottom + reach) return false;
+  const { points } = stroke;
+  if (points.length === 1) return distanceToSegment(points[0], from, to) <= reach;
+  for (let i = 1; i < points.length; i++) if (segmentDistance(points[i - 1], points[i], from, to) <= reach) return true;
+  return false;
+}
+
+function insideLoop(point: Spot, loop: Spot[]): boolean {
+  let inside = false;
+  for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
+    const a = loop[i];
+    const b = loop[j];
+    if (a.y > point.y !== b.y > point.y && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/** The strokes the lasso caught: those with most of their points inside the loop, so a rough loop is enough. */
+export function strokesInLoop(strokes: Stroke[], loop: Spot[]): Stroke[] {
+  if (loop.length < 3) return [];
+  return strokes.filter((stroke) => {
+    if (stroke.erase || stroke.points.length === 0) return false;
+    const inside = stroke.points.filter((point) => insideLoop(point, loop)).length;
+    return inside > stroke.points.length / 2;
+  });
+}
+
+/** The stroke at another place on the sheet. */
+export function movedStroke(stroke: Stroke, dx: number, dy: number): Stroke {
+  return { ...stroke, points: stroke.points.map((point) => ({ ...point, x: point.x + dx, y: point.y + dy })) };
 }
 
 /** Lowest point that was written on, to know how much room is left below. */
