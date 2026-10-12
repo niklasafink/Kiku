@@ -22,7 +22,9 @@ interface Plan {
   unit: Record<Billing, string>;
   note?: Record<Billing, string>;
   /** Where the button leads; for Pro that depends on the billing period chosen. */
-  cta: { label: string; href: string | Record<Billing, string>; external?: boolean };
+  cta: { label: string; href: string | Record<Billing, string> };
+  /** The free plan's other way in: the source code, in place of a note. */
+  selfHost?: boolean;
   highlighted?: boolean;
 }
 
@@ -43,15 +45,16 @@ const PLANS: Plan[] = [
   {
     id: "free",
     name: "Kostenlos",
-    tagline: "Selbst gehostet, ohne KI. Mit eigenem API-Key auch mit.",
+    tagline: "Mit Konto bei uns oder selbst gehostet. Die KI prüft mit einem einfacheren Modell.",
     price: { monthly: "0 €", yearly: "0 €" },
     unit: { monthly: "für immer", yearly: "für immer" },
-    cta: { label: "Code auf GitHub", href: GITHUB_URL, external: true },
+    cta: { label: "Kostenlos starten", href: "/auth/sign-up" },
+    selfHost: true,
   },
   {
     id: "pro",
     name: "Pro",
-    tagline: "Gehostet, mit KI-Auswertung und Sync zwischen deinen Geräten.",
+    tagline: "Genauere KI-Auswertung und bessere Spracherkennung.",
     price: { monthly: "4,99 €", yearly: "29 €" },
     unit: { monthly: "pro Monat", yearly: "pro Jahr" },
     note: { monthly: "Monatlich kündbar", yearly: "2,42 € im Monat statt 4,99 €" },
@@ -74,12 +77,16 @@ const PLANS: Plan[] = [
 
 const ALL = { free: true, pro: true, lifetime: true } as const;
 
+const PAID = { free: false, pro: true, lifetime: true } as const;
+
 const GROUPS: Group[] = [
   {
     title: "In jedem Tarif",
     rows: [
-      { label: "Unbegrenzt Karten und Ordner, Import aus CSV", cells: ALL },
-      { label: "Lernen, Lösung aufdecken, schwache Karten wiederholen", cells: ALL },
+      { label: "Unbegrenzt Karten und Ordner, Import aus CSV und Anki", cells: ALL },
+      { label: "KI prüft deine Antwort, gesprochen oder getippt", cells: ALL },
+      { label: "Konto, Sync zwischen Geräten, Verlauf mit Score pro Karte", cells: ALL },
+      { label: "Zugriff für Claude und andere Assistenten (MCP)", cells: ALL },
       { label: "Suche, Backup und Export, offener Quellcode (MIT)", cells: ALL },
     ],
   },
@@ -87,17 +94,22 @@ const GROUPS: Group[] = [
     title: "Das unterscheidet sie",
     rows: [
       {
-        label: "KI prüft deine Antwort, gesprochen oder getippt",
+        label: "Auswertung mit dem genaueren KI-Modell",
         cells: {
           free: false,
           pro: { monthly: "300 pro Monat", yearly: "500 pro Monat" },
           lifetime: "4.000 pro Jahr",
         },
       },
-      { label: "Verlauf mit Score pro Karte", cells: { free: false, pro: true, lifetime: true } },
-      { label: "Konto und Sync zwischen Geräten", cells: { free: false, pro: true, lifetime: true } },
-      { label: "Zugriff für Claude und andere Assistenten (MCP)", cells: { free: false, pro: true, lifetime: true } },
-      { label: "Mehr KI zum Selbstkostenpreis dazukaufen", cells: { free: false, pro: true, lifetime: true } },
+      {
+        label: "Spracheingabe",
+        cells: { free: "Im Browser", pro: "Genauere Erkennung", lifetime: "Genauere Erkennung" },
+      },
+      {
+        label: "Karten aus PDF, Folien und Fotos",
+        cells: { free: "15 Anfragen pro Tag", pro: "300 Anfragen pro Tag", lifetime: "300 Anfragen pro Tag" },
+      },
+      { label: "Mehr KI zum Selbstkostenpreis dazukaufen", cells: PAID },
       {
         label: "Laufzeit",
         cells: {
@@ -114,7 +126,7 @@ const QUESTIONS = [
   {
     question: "Was ist im kostenlosen Tarif drin?",
     answer:
-      "Die ganze App zum Selbsthosten: Karten, Ordner, Lernen, Import, Suche und Backup. Die KI-Auswertung ist nicht dabei, außer du hinterlegst einen eigenen API-Key. Der Quellcode steht unter MIT-Lizenz auf GitHub.",
+      "Die ganze App mit Konto und Sync: Karten, Ordner, Lernen, Import, Suche und Backup. Die KI prüft deine Antworten mit einem einfacheren Modell, die Spracheingabe läuft im Browser. Du kannst Kiku auch selbst hosten, der Quellcode steht unter MIT-Lizenz auf GitHub.",
   },
   {
     question: "Was zählt als KI-Verarbeitung?",
@@ -214,20 +226,22 @@ function PlanHead({ plan, billing, compact }: { plan: Plan; billing: Billing; co
         <span className="text-4xl font-bold tracking-tight tabular-nums">{plan.price[billing]}</span>
         <span className="text-sm opacity-70">{plan.unit[billing]}</span>
       </p>
-      <p className="mt-1 min-h-5 text-sm opacity-70">{plan.note?.[billing]}</p>
-      {!compact && <p className="mt-2 text-sm text-pretty opacity-80">{plan.tagline}</p>}
-      <div className="mt-auto pt-4">
-        {plan.cta.external ? (
-          <a href={href} target="_blank" rel="noreferrer" className={`${button} w-full`}>
-            <GitHubIcon className="size-4" />
-            {plan.cta.label}
+      <p className="mt-1 min-h-5 text-sm opacity-70">
+        {plan.selfHost ? (
+          <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:underline">
+            <GitHubIcon className="size-3.5" />
+            Oder selbst hosten
           </a>
         ) : (
-          <Link href={href} className={`${button} w-full`}>
-            {plan.cta.label}
-            <ArrowRight className="size-4" aria-hidden />
-          </Link>
+          plan.note?.[billing]
         )}
+      </p>
+      {!compact && <p className="mt-2 text-sm text-pretty opacity-80">{plan.tagline}</p>}
+      <div className="mt-auto pt-4">
+        <Link href={href} className={`${button} w-full`}>
+          {plan.cta.label}
+          <ArrowRight className="size-4" aria-hidden />
+        </Link>
       </div>
     </div>
   );
@@ -350,8 +364,7 @@ export function Pricing() {
             Welcher Tarif passt zu&nbsp;dir?
           </h1>
           <p className={LEAD}>
-            Kostenlos, wenn du selbst hostest. Pro, wenn die KI deine Antworten prüfen soll. Einmalkauf, wenn du dafür
-            kein Abo willst.
+            Kostenlos zum Loslegen. Pro, wenn die KI genauer prüfen soll. Einmalkauf, wenn du dafür kein Abo willst.
           </p>
           <div className="mt-5 flex justify-center">
             <BillingToggle value={billing} onChange={setBilling} />

@@ -6,7 +6,7 @@ import { SERVER_MODE } from "@/server/auth";
 
 export const metadata: Metadata = {
   title: "Preise · Kiku",
-  description: "Kostenlos selbst hosten, Pro für 4,99 € im Monat oder 29 € im Jahr, oder einmal kaufen für 49 €.",
+  description: "Kostenlos mit Konto oder selbst gehostet, Pro für 4,99 € im Monat oder 29 € im Jahr, oder einmal kaufen für 49 €.",
 };
 
 export default function PricingPage() {

@@ -1,8 +1,19 @@
 import Image, { type StaticImageData } from "next/image";
 import Link from "next/link";
-import { ArrowRight, Bot, Check, Plus } from "lucide-react";
-import shotExport from "../_assets/shot-export.png";
-import shotGenerate from "../_assets/shot-generate.png";
+import {
+  ArrowDown,
+  ArrowDownUp,
+  ArrowRight,
+  ArrowUp,
+  Camera,
+  Check,
+  FileText,
+  type LucideIcon,
+  Package,
+  Plus,
+  Presentation,
+  Sparkle,
+} from "lucide-react";
 import shotGraded from "../_assets/shot-graded.png";
 import shotInput from "../_assets/shot-input.png";
 import shotPhoneMic from "../_assets/shot-phone-mic.png";
@@ -148,54 +159,137 @@ export function Problem() {
   );
 }
 
-/** A small tile: its title, and a screenshot running out of the bottom edge. */
-function ShotTile({ title, image, alt }: { title: string; image: StaticImageData; alt: string }) {
+/** A small tile: its title above a picture drawn for exactly this width. */
+function PictureTile({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className={TILE}>
       <h3 className={TILE_TITLE}>{title}</h3>
-      <div className="relative -mx-6 mt-5 -mb-6 min-h-52 flex-1 overflow-hidden rounded-t-xl border-t border-base-300 sm:-mx-7 sm:-mb-7">
-        <Image src={image} alt={alt} fill sizes="(min-width: 768px) 400px, 100vw" className="object-cover object-left-top" />
+      <div
+        className="mt-5 flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl bg-base-200 px-4 py-5"
+        aria-hidden
+      >
+        {children}
       </div>
     </div>
   );
 }
 
-const MCP_TOOLS = ["get_overview", "create_folder", "create_cards"];
+/** The round arrow between the two halves of a tile picture. */
+function Between({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-content">
+      <Icon className="size-4" strokeWidth={2.5} />
+    </span>
+  );
+}
 
-/** An assistant turning notes into cards over MCP. */
+const SOURCES = [
+  { icon: FileText, label: "PDF", tilt: "-rotate-3" },
+  { icon: Presentation, label: "Folien", tilt: "" },
+  { icon: Camera, label: "Foto", tilt: "rotate-3" },
+];
+
+/** Three kinds of source material turning into a stack of cards. */
+function FromMaterial() {
+  return (
+    <>
+      <div className="grid w-full max-w-[300px] grid-cols-3 gap-2.5">
+        {SOURCES.map(({ icon: Icon, label, tilt }) => (
+          <span
+            key={label}
+            className={`flex flex-col items-center gap-1.5 rounded-xl border border-base-300 bg-base-100 py-3 text-xs font-bold ${tilt}`}
+          >
+            <Icon className="size-6 opacity-70" strokeWidth={1.75} />
+            {label}
+          </span>
+        ))}
+      </div>
+      <Between icon={ArrowDown} />
+      <div className="relative w-full max-w-[300px] pb-4">
+        <span className="absolute inset-x-6 top-4 bottom-0 rounded-2xl border border-base-300 bg-base-100" />
+        <span className="absolute inset-x-3 top-2 bottom-2 rounded-2xl border border-base-300 bg-base-100" />
+        <div className="relative rounded-2xl border border-base-300 bg-base-100 p-3.5">
+          <p className="flex items-center justify-between">
+            <span className={SECTION_LABEL}>Frage</span>
+            <span className="rounded-full bg-base-200 px-2 py-0.5 text-xs font-bold">12 Karten</span>
+          </p>
+          <p className="mt-1.5 text-sm leading-snug font-bold">Welche Voraussetzungen hat § 823 Abs. 1 BGB?</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** A row naming a set of cards: in Kiku, or as a file for Anki. */
+function Deck({ icon, name, detail }: { icon: React.ReactNode; name: string; detail: string }) {
+  return (
+    <div className="flex w-full max-w-[300px] items-center gap-3 rounded-2xl border border-base-300 bg-base-100 p-3">
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-base-200 text-xl">{icon}</span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-bold">{name}</span>
+        <span className="block text-xs opacity-70">{detail}</span>
+      </span>
+    </div>
+  );
+}
+
+/** A folder in Kiku and the same cards as an Anki package, going both ways. */
+function AnkiBothWays() {
+  return (
+    <>
+      <Deck icon="⚖️" name="Jura" detail="48 Karten in Kiku" />
+      <Between icon={ArrowDownUp} />
+      <Deck icon={<Package className="size-5 opacity-70" />} name="Jura.apkg" detail="Anki-Paket" />
+      <div className="flex gap-1.5 font-mono text-xs">
+        {[".apkg", ".csv", ".txt"].map((format) => (
+          <span key={format} className="rounded-md border border-base-300 bg-base-100 px-1.5 py-0.5">
+            {format}
+          </span>
+        ))}
+      </div>
+    </>
+  );
+}
+
+const MCP_TOOLS = ["create_folder", "create_cards"];
+
+/** A chat window: the assistant turns notes into cards with Kiku's tools. */
 function McpChat() {
   return (
-    <div className="flex min-w-0 flex-col gap-2.5 text-[0.92rem] leading-snug" aria-hidden>
-      <div className="flex items-start gap-2.5">
-        <span className="grid size-8 shrink-0 place-items-center rounded-full border border-base-300 bg-base-100 text-xs font-extrabold">
-          Du
+    <div
+      className="w-full min-w-0 overflow-hidden rounded-2xl border border-base-300 bg-base-100 text-sm leading-snug shadow-[0_24px_60px_-28px_rgb(0_0_0/0.35)]"
+      aria-hidden
+    >
+      <div className="flex items-center gap-2 border-b border-base-300 px-4 py-2.5 text-xs font-bold">
+        <Sparkle className="size-4 text-primary" />
+        Claude
+        <span className="ml-auto flex items-center gap-1.5 rounded-full bg-base-200 px-2 py-0.5 font-semibold whitespace-nowrap">
+          <span className="size-1.5 rounded-full bg-success" />
+          Kiku verbunden
         </span>
-        <p className="rounded-2xl rounded-tl-sm border border-base-300 bg-base-100 px-3.5 py-2.5">
-          Mach mir aus meinen Notizen zu § 823 BGB Karteikarten im Ordner Zivilrecht.
+      </div>
+      <div className="flex flex-col gap-3 p-4">
+        <p className="max-w-[88%] self-end rounded-2xl rounded-br-sm bg-base-200 px-3.5 py-2">
+          Mach aus meinen Notizen zu § 823 BGB Karteikarten im Ordner Zivilrecht.
+        </p>
+        <ul className="divide-y divide-base-300 rounded-xl border border-base-300 text-xs">
+          {MCP_TOOLS.map((tool) => (
+            <li key={tool} className="flex items-center gap-2 px-3 py-1.5">
+              <Check className="size-3.5 shrink-0 text-success" strokeWidth={3} />
+              <span className="truncate font-mono">{tool}</span>
+              <span className="ml-auto opacity-60">Kiku</span>
+            </li>
+          ))}
+        </ul>
+        <p>
+          Erledigt: 6 neue Karten in <strong>Jura › Zivilrecht</strong>, jede mit Frage und Musterlösung.
         </p>
       </div>
-      <div className="flex items-start gap-2.5">
-        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-content">
-          <Bot className="size-4" />
+      <div className="mx-4 mb-4 flex items-center gap-2 rounded-xl border border-base-300 py-1.5 pr-1.5 pl-3 text-xs">
+        <span className="opacity-50">Antworten …</span>
+        <span className="ml-auto grid size-6 place-items-center rounded-lg bg-primary text-primary-content">
+          <ArrowUp className="size-3.5" strokeWidth={2.5} />
         </span>
-        <div className="min-w-0 rounded-2xl rounded-tl-sm border border-base-300 bg-base-100 px-3.5 py-2.5">
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {MCP_TOOLS.map((tool) => (
-              <span key={tool} className="rounded-md bg-base-200 px-1.5 py-0.5 font-mono text-xs">
-                {tool}
-              </span>
-            ))}
-          </div>
-          <p>
-            Erledigt: 6 neue Karten in <strong>Jura › Zivilrecht</strong>, jede mit Frage und Musterlösung.
-          </p>
-          <ul className="mt-2 list-disc pl-5 font-semibold">
-            <li>Voraussetzungen § 823 Abs. 1 BGB</li>
-            <li>Geschützte Rechtsgüter</li>
-            <li>Haftungsbegründende Kausalität</li>
-            <li className="opacity-60">+ 3 weitere</li>
-          </ul>
-        </div>
       </div>
     </div>
   );
@@ -216,16 +310,12 @@ export function Features() {
               <Image src={shotPhoneMic} alt="Kiku auf dem Handy: Frage und Mikrofon-Knopf" sizes="220px" />
             </div>
           </div>
-          <ShotTile
-            title="Karten aus PDF, Folien und Fotos."
-            image={shotGenerate}
-            alt="Karten aus Unterlagen: Datei wählen oder Text einfügen"
-          />
-          <ShotTile
-            title="Anki-Import und -Export."
-            image={shotExport}
-            alt="Karten exportieren als Tabelle, Anki-Paket oder Text"
-          />
+          <PictureTile title="Karten aus PDF, Folien und Fotos.">
+            <FromMaterial />
+          </PictureTile>
+          <PictureTile title="Anki-Import und -Export.">
+            <AnkiBothWays />
+          </PictureTile>
           <div
             className={`${TILE} items-center gap-6 border-transparent bg-primary/10 sm:grid sm:grid-cols-2 md:col-span-2`}
           >
@@ -259,7 +349,7 @@ const QUESTIONS = [
   {
     question: "Ist Kiku kostenlos?",
     answer:
-      "Der Code ist offen. Selbst gehostet kostet Kiku nichts, mit eigenem API-Key auch mit KI. Gehostet mit Sync gibt es Pro.",
+      "Ja. Mit einem kostenlosen Konto lernst du sofort, mit KI-Auswertung und Sync. Pro prüft genauer und versteht dich beim Sprechen besser. Der Code ist offen, du kannst Kiku auch selbst hosten.",
   },
 ];
 
