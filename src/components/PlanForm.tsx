@@ -125,7 +125,7 @@ export function PlanForm({
             <>
               <span className="loading loading-spinner" />
               <span className="font-bold">
-                {reading.name} wird gelesen{reading.total > 0 && ` · Seite ${reading.done} von ${reading.total}`}
+                {reading.name} wird gelesen{reading.total > 0 && ` (Seite ${reading.done} von ${reading.total})`}
               </span>
             </>
           ) : (

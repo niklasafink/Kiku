@@ -315,7 +315,7 @@ function Plans() {
                   <span className="text-lg font-black">{week.label}</span>
                   {isCurrent && <span className="badge badge-primary badge-sm font-bold">Jetzt</span>}
                   <span className="min-w-0 flex-1 text-sm opacity-70">
-                    {week.dates} · {week.title}
+                    {week.dates}: {week.title}
                   </span>
                   <span className="text-sm font-bold tabular-nums opacity-70">
                     {progress.done} / {progress.total}

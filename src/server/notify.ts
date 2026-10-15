@@ -20,7 +20,7 @@ async function send(text: string): Promise<void> {
   }
 }
 
-const who = (user: { email: string; name?: string }) => `${user.name ? `${user.name} · ` : ""}${user.email}`;
+const who = (user: { email: string; name?: string }) => (user.name ? `${user.name} (${user.email})` : user.email);
 
 /** Reads the new user out of a successful sign-up response and sends the message. Never throws. */
 export async function notifySignUp(response: Response): Promise<void> {

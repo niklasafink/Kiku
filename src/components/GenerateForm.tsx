@@ -264,7 +264,7 @@ export function GenerateForm({
               <>
                 <span className="loading loading-spinner loading-sm" />
                 <span className="text-sm font-bold">
-                  Datei wird gelesen{status.total > 0 && ` · ${status.done} von ${status.total}`}
+                  Datei wird gelesen{status.total > 0 && ` (${status.done} von ${status.total})`}
                 </span>
               </>
             ) : (

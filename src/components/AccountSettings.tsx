@@ -311,7 +311,7 @@ function McpSection() {
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-bold">{token.name}</span>
                 <span className="block text-xs opacity-70">
-                  Erstellt {formatDateTime(token.createdAt)} ·{" "}
+                  Erstellt {formatDateTime(token.createdAt)},{" "}
                   {token.lastUsedAt ? `zuletzt benutzt ${formatDateTime(token.lastUsedAt)}` : "noch nie benutzt"}
                 </span>
               </span>

@@ -254,7 +254,7 @@ export function ImportForm({
             <p className="text-sm font-bold">
               {number.format(count)} {count === 1 ? "Karte" : "Karten"} erkannt
               {format === "auto" && count > 0 && result.format && (
-                <span className="font-normal opacity-70"> · {FORMAT_LABELS[result.format]}</span>
+                <span className="font-normal opacity-70"> ({FORMAT_LABELS[result.format]})</span>
               )}
             </p>
             {result.skipped > 0 && (

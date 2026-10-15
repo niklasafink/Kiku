@@ -223,9 +223,9 @@ export function FolderView({ folderId }: { folderId: string | null }) {
             {scope.length > 0 && (
               <p className="text-sm opacity-70">
                 {pluralize(scope.length, "Karte", "Karten")}
-                {scope.length - practised.length > 0 && ` · ${scope.length - practised.length} neu`}
-                {average !== null && ` · Ø ${average} %`}
-                {` · ${Math.round(((scope.length - weakCount) / scope.length) * 100)} % sitzen`}
+                {scope.length - practised.length > 0 && `, ${scope.length - practised.length} neu`}
+                {average !== null && `, Ø ${average} %`}
+                {`, ${Math.round(((scope.length - weakCount) / scope.length) * 100)} % sitzen`}
               </p>
             )}
             {exam !== undefined && (

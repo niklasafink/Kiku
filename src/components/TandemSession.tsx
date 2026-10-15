@@ -387,7 +387,7 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
           <X className="size-5" />
         </Link>
         <p className="min-w-0 flex-1 truncate font-extrabold">
-          {modeTitle} <span className="font-bold opacity-60">· {folder.name}</span>
+          {modeTitle}: <span className="font-bold opacity-60">{folder.name}</span>
         </p>
         {current && (
           <span className="badge badge-ghost font-extrabold tabular-nums">

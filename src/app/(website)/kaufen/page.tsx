@@ -5,7 +5,7 @@ import { WebsiteFrame } from "../_components/WebsiteFrame";
 import { isOffer, purchasePath } from "@/lib/offers";
 import { currentUser, SERVER_MODE } from "@/server/auth";
 
-export const metadata: Metadata = { title: "Kaufen · Kiku", robots: { index: false } };
+export const metadata: Metadata = { title: "Kaufen | Kiku", robots: { index: false } };
 
 /** Where the buttons of the pricing page lead: ?tarif= names the offer. */
 export default async function PurchasePage({ searchParams }: { searchParams: Promise<{ tarif?: string | string[] }> }) {

@@ -5,7 +5,7 @@ import { WebsiteFrame } from "../_components/WebsiteFrame";
 import { SERVER_MODE } from "@/server/auth";
 
 export const metadata: Metadata = {
-  title: "Impressum · Kiku",
+  title: "Impressum | Kiku",
   description: "Anbieterkennzeichnung der Dealzforest UG (haftungsbeschränkt).",
 };
 

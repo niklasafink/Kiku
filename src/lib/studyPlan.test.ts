@@ -118,7 +118,7 @@ describe("scheduling a plan from topics", () => {
     expect(plan.weeks[0].groups.at(-1)?.area).toBe("wiederholung");
     expect(plan.shortfall).toEqual({ needed: 2400, available: 600 });
     expect(plan.tasksMissing).toBe(true);
-    expect(plan.weeks[0].groups[0].items[0].note).toBe("Skript 1 · keine Aufgaben in den Unterlagen");
+    expect(plan.weeks[0].groups[0].items[0].note).toBe("Skript 1, keine Aufgaben in den Unterlagen");
   });
 });
 

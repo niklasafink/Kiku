@@ -4,7 +4,7 @@ import { LegalPage } from "../_components/LegalPage";
 import { SERVER_MODE } from "@/server/auth";
 
 export const metadata: Metadata = {
-  title: "AGB · Kiku",
+  title: "AGB | Kiku",
   description: "Nutzungsbedingungen für die von Dealzforest betriebene Kiku-App, inklusive Widerrufsbelehrung.",
 };
 

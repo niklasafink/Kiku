@@ -5,7 +5,7 @@ import { WebsiteFrame } from "../_components/WebsiteFrame";
 import { SERVER_MODE } from "@/server/auth";
 
 export const metadata: Metadata = {
-  title: "Preise · Kiku",
+  title: "Preise | Kiku",
   description: "Kostenlos mit Konto oder selbst gehostet, Pro für 4,99 € im Monat oder 29 € im Jahr, oder einmal kaufen für 49 €.",
 };
 

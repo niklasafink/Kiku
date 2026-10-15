@@ -296,7 +296,7 @@ export function Recorder({
 
       <p className={compact ? "text-center text-[11px] leading-tight font-bold" : "min-h-6 text-sm font-bold"} aria-live="polite">
         {(phase === "idle" || phase === "starting") && <span className="opacity-70">{label}</span>}
-        {phase === "recording" && <span className="tabular-nums">{compact ? formatDuration(seconds) : `Aufnahme läuft · ${formatDuration(seconds)}`}</span>}
+        {phase === "recording" && <span className="tabular-nums">{compact ? formatDuration(seconds) : `Aufnahme läuft, ${formatDuration(seconds)}`}</span>}
         {phase === "transcribing" && <span className="opacity-70">{compact ? "Transkribiert …" : "Wird transkribiert …"}</span>}
       </p>
 

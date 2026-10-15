@@ -21,7 +21,7 @@ describe("notifySignUp", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.telegram.org/bot123:abc/sendMessage");
-    expect(JSON.parse(init.body)).toEqual({ chat_id: "42", text: "Neue Registrierung bei Kiku\nAnna · anna@example.com" });
+    expect(JSON.parse(init.body)).toEqual({ chat_id: "42", text: "Neue Registrierung bei Kiku\nAnna (anna@example.com)" });
   });
 
   it("does nothing when no bot is configured", async () => {
@@ -46,6 +46,6 @@ describe("notifyPurchaseRequest", () => {
   it("sends who wants to buy what", async () => {
     await notifyPurchaseRequest({ email: "anna@example.com", name: "Anna" }, "pro-yearly");
     const [, init] = fetchMock.mock.calls[0];
-    expect(JSON.parse(init.body).text).toBe("Kaufanfrage bei Kiku\nAnna · anna@example.com\nPro, 29 € im Jahr");
+    expect(JSON.parse(init.body).text).toBe("Kaufanfrage bei Kiku\nAnna (anna@example.com)\nPro, 29 € im Jahr");
   });
 });

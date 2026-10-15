@@ -235,7 +235,7 @@ export function schedulePlan(input: PlanInput): StudyPlan {
         id: `t${topicIndex + 1}`,
         name: topic.name,
         minutes: minutesOf(topic),
-        note: [topic.sources, topic.hasTasks ? "" : "keine Aufgaben in den Unterlagen"].filter(Boolean).join(" · ") || undefined,
+        note: [topic.sources, topic.hasTasks ? "" : "keine Aufgaben in den Unterlagen"].filter(Boolean).join(", ") || undefined,
         kind: "study",
       });
     }
@@ -247,7 +247,7 @@ export function schedulePlan(input: PlanInput): StudyPlan {
       dates: `${shortDate(span.from)}–${shortDate(span.to)}`,
       from: span.from,
       to: span.to,
-      title: names.length ? names.slice(0, 3).join(" · ") + (names.length > 3 ? " …" : "") : "Puffer",
+      title: names.length ? names.slice(0, 3).join(", ") + (names.length > 3 ? " …" : "") : "Puffer",
       groups,
     };
   });

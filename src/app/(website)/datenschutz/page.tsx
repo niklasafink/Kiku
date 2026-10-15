@@ -5,7 +5,7 @@ import { LegalPage } from "../_components/LegalPage";
 import { SERVER_MODE } from "@/server/auth";
 
 export const metadata: Metadata = {
-  title: "Datenschutz · Kiku",
+  title: "Datenschutz | Kiku",
   description: "Welche Daten Kiku verarbeitet, wofür, und welche Dienstleister beteiligt sind.",
 };
 

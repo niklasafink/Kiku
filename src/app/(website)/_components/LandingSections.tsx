@@ -119,7 +119,7 @@ function ThenAndNow() {
         <span className={`${SECTION_LABEL} pl-1`}>In der Klausur</span>
         <div className="rounded-md border border-base-300 bg-base-100 px-4 pt-4 pb-6 shadow-[0_3px_0_0_var(--color-base-300)]">
           <p className="flex justify-between border-b border-base-300 pb-2 text-[0.7rem] font-bold tracking-wide uppercase opacity-60">
-            <span>Zivilrecht I · Klausur</span>
+            <span>Klausur Zivilrecht I</span>
             <span>Aufgabe 2</span>
           </p>
           <p className="mt-3 text-[0.95rem] leading-snug font-bold">

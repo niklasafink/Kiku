@@ -145,10 +145,14 @@ function History({ attempts }: { attempts: Attempt[] }) {
       <div className="tile p-4">
         <ScoreChart attempts={attempts} />
         <p className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-          {pluralize(attempts.length, "Versuch", "Versuche")} · zuletzt <span className="font-extrabold">{last} %</span>
+          {pluralize(attempts.length, "Versuch", "Versuche")}, zuletzt{" "}
+          <span>
+            <span className="font-extrabold">{last} %</span>
+            {attempts.length > 1 && ","}
+          </span>
           {attempts.length > 1 && (
             <>
-              · seit dem ersten Versuch <Trend delta={last - first} />
+              seit dem ersten Versuch <Trend delta={last - first} />
             </>
           )}
         </p>

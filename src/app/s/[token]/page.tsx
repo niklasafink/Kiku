@@ -63,8 +63,7 @@ export default function SharedDeckPage() {
               <h1 className="text-2xl font-black break-words">{deck.name}</h1>
               <p className="text-sm opacity-70">
                 {pluralize(deck.cards.length, "Karte", "Karten")}
-                {deck.folders.length > 1 && ` in ${pluralize(deck.folders.length - 1, "Unterordner", "Unterordnern")}`} ·
-                geteiltes Deck
+                {deck.folders.length > 1 && ` in ${pluralize(deck.folders.length - 1, "Unterordner", "Unterordnern")}`}, geteiltes Deck
               </p>
             </div>
           </div>
