@@ -2,6 +2,7 @@
 // the browser and only their text goes to the AI, so the size of a file does not matter. Pages
 // without a text layer (scans, photos) are sent as pictures, one at a time, to be read.
 import { readDocx, readPptx } from "./office";
+import "./streamIterator";
 
 export class MaterialError extends Error {}
 
@@ -32,7 +33,8 @@ async function readPdf(data: ArrayBuffer, onProgress?: (done: number, total: num
   // copies of brand-new functions (Promise.try, Map.getOrInsertComputed, Math.sumPrecise); with the
   // modern build, browsers without them (Safari before 26.2, older Chrome) fail on every PDF.
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
+  // Our own worker entry, so the Safari stream fix runs inside the worker too.
+  pdfjs.GlobalWorkerOptions.workerPort ??= new Worker(new URL("./pdfWorker.ts", import.meta.url), { type: "module" });
   const task = pdfjs.getDocument({ data });
   const document = await task.promise;
   const pages: string[] = [];
