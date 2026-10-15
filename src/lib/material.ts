@@ -111,7 +111,9 @@ export async function readMaterial(file: File, onProgress?: (done: number, total
       throw new MaterialError("Die PDF ist mit einem Passwort geschützt. Speichere sie ohne Passwort und lade sie erneut hoch.");
     }
     console.error(error);
-    throw new MaterialError("Die Datei konnte nicht gelesen werden.");
+    // The technical reason goes along, so a failure in one browser can be traced from a screenshot.
+    const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    throw new MaterialError(`Die Datei konnte nicht gelesen werden (${reason.slice(0, 200)}).`);
   }
   pages = pages.filter((page) => page.trim());
   if (pages.join("").length < 80) throw new MaterialError("In der Datei war kaum lesbarer Text zu finden.");

@@ -143,6 +143,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
   const schedules = useSchedules();
   const savedSession = useSavedSession(folderId);
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [generateReviewing, setGenerateReviewing] = useState(false);
   const [showSolutions, setShowSolutions] = useState(true);
   const [shown, setShown] = useState(CARDS_PAGE);
   const [tag, setTag] = useState<string | null>(null);
@@ -151,7 +152,10 @@ export function FolderView({ folderId }: { folderId: string | null }) {
   const [chosenCount, setChosenCount] = useState(0);
   const [now] = useState(() => Date.now());
   const newPerDay = useNewPerDay();
-  const closeDialog = () => setDialog(null);
+  const closeDialog = () => {
+    setDialog(null);
+    setGenerateReviewing(false);
+  };
 
   if (!folders || !allCards || !latest || !schedules) {
     return <div className="skeleton h-40 w-full rounded-box" />;
@@ -555,9 +559,15 @@ export function FolderView({ folderId }: { folderId: string | null }) {
             />
           </Modal>
 
-          <Modal open={dialog === "generate"} onClose={closeDialog} title={`Karten aus Unterlagen für „${folder.name}“`} full>
+          <Modal
+            open={dialog === "generate"}
+            onClose={closeDialog}
+            title={`Karten aus Unterlagen für „${folder.name}“`}
+            full={generateReviewing}
+          >
             <GenerateForm
               onClose={closeDialog}
+              onReviewChange={setGenerateReviewing}
               onSubmit={async (rows) => {
                 await createCards(folder.id, rows);
               }}

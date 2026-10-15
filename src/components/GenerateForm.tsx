@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { FileText, FileUp, Sparkles, Trash2, X } from "lucide-react";
 import { chunkPages } from "@/lib/chunks";
 import { GENERATE_MODE_LABELS, GENERATE_MODES, type GenerateMode } from "@/lib/generateModes";
@@ -26,9 +26,12 @@ type Status =
 export function GenerateForm({
   onSubmit,
   onClose,
+  onReviewChange,
 }: {
   onSubmit: (rows: { question: string; solution: string }[]) => void | Promise<void>;
   onClose: () => void;
+  /** True while the proposals are shown, so the dialog can grow for them. */
+  onReviewChange?: (reviewing: boolean) => void;
 }) {
   const [material, setMaterial] = useState<{ name: string; pages: string[] } | null>(null);
   const [text, setText] = useState("");
@@ -44,6 +47,11 @@ export function GenerateForm({
 
   const pages = material ? material.pages : text.trim() ? text.split(/\n\s*\n/) : [];
   const busy = status.step !== "idle";
+  const reviewing = drafts !== null;
+
+  useEffect(() => {
+    onReviewChange?.(reviewing);
+  }, [reviewing, onReviewChange]);
 
   /** Several files become one piece of material, e.g. photos of the pages of a script. */
   async function loadFiles(files: File[]) {
@@ -223,7 +231,7 @@ export function GenerateForm({
   // Step 1: choose the material.
   return (
     <form
-      className="flex min-h-0 flex-1 flex-col gap-4"
+      className="flex flex-col gap-4"
       onDragOver={(event) => event.preventDefault()}
       onDrop={handleDrop}
       onSubmit={(event) => {
@@ -231,100 +239,107 @@ export function GenerateForm({
         if (!busy) void generate();
       }}
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
-        <p className="text-sm opacity-70">
-          Lade ein Skript, Folien, Übungsaufgaben oder alte Klausuren hoch (PDF, PowerPoint, Word, Text, Fotos) oder füge
-          Text ein. Die KI schlägt Karten mit Frage und ausformulierter Lösung vor; du prüfst sie, bevor etwas gespeichert wird.
-        </p>
+      <p className="-mt-2 text-sm opacity-70">Die KI schlägt Karten vor, du prüfst sie vor dem Speichern.</p>
 
-        {material ? (
-          <div className="flex items-center gap-3 rounded-field border-2 border-base-300 px-4 py-3">
-            <FileText className="size-5 shrink-0 opacity-60" aria-hidden />
-            <span className="min-w-0 flex-1 truncate font-bold">{material.name}</span>
-            <span className="shrink-0 text-sm opacity-70">{pluralize(material.pages.length, "Abschnitt", "Abschnitte")}</span>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setMaterial(null)} disabled={busy}>
-              <X className="size-4" /> Entfernen
-            </button>
-          </div>
-        ) : (
-          <>
-            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-box border-2 border-dashed border-base-300 px-4 py-8 text-center hover:border-primary">
-              {status.step === "reading" ? (
-                <>
-                  <span className="loading loading-spinner" />
-                  <span className="font-bold">
-                    Datei wird gelesen{status.total > 0 && ` · ${status.done} von ${status.total}`}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <FileUp className="size-7 opacity-60" aria-hidden />
-                  <span className="font-bold">Datei wählen oder hierher ziehen</span>
-                  <span className="text-sm opacity-70">PDF (auch gescannt), .pptx, .docx, .txt oder Fotos deiner Mitschrift</span>
-                </>
-              )}
-              <input
-                type="file"
-                accept={MATERIAL_ACCEPT}
-                multiple
-                className="hidden"
-                disabled={busy}
-                onChange={(e) => {
-                  const files = [...(e.target.files ?? [])];
-                  e.target.value = "";
-                  void loadFiles(files);
-                }}
-              />
-            </label>
-            <label className="flex min-h-0 flex-1 flex-col gap-1.5">
-              <span className="text-sm font-bold">Oder Text einfügen</span>
-              <textarea
-                className="textarea min-h-32 w-full flex-1"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Text aus dem Skript, einer Zusammenfassung oder deinen Notizen …"
-              />
-            </label>
-          </>
-        )}
+      {material ? (
+        <div className="flex items-center gap-3 rounded-field border-2 border-base-300 px-3 py-2.5">
+          <FileText className="size-5 shrink-0 opacity-60" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-sm font-bold">{material.name}</span>
+          <span className="shrink-0 text-xs opacity-60">{pluralize(material.pages.length, "Abschnitt", "Abschnitte")}</span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-square btn-xs"
+            onClick={() => setMaterial(null)}
+            disabled={busy}
+            aria-label="Datei entfernen"
+            title="Entfernen"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      ) : (
+        <>
+          <label className="flex cursor-pointer items-center gap-3 rounded-field border-2 border-dashed border-base-300 px-4 py-3 transition-colors hover:border-primary">
+            {status.step === "reading" ? (
+              <>
+                <span className="loading loading-spinner loading-sm" />
+                <span className="text-sm font-bold">
+                  Datei wird gelesen{status.total > 0 && ` · ${status.done} von ${status.total}`}
+                </span>
+              </>
+            ) : (
+              <>
+                <FileUp className="size-5 shrink-0 opacity-60" aria-hidden />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-sm font-bold">Datei wählen oder hierher ziehen</span>
+                  <span className="text-xs opacity-60">PDF, PowerPoint, Word, Text oder Fotos</span>
+                </span>
+              </>
+            )}
+            <input
+              type="file"
+              accept={MATERIAL_ACCEPT}
+              multiple
+              className="hidden"
+              disabled={busy}
+              onChange={(e) => {
+                const files = [...(e.target.files ?? [])];
+                e.target.value = "";
+                void loadFiles(files);
+              }}
+            />
+          </label>
+          <textarea
+            className="textarea min-h-24 w-full text-sm"
+            rows={3}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            aria-label="Oder Text einfügen"
+            placeholder="… oder Text aus Skript oder Notizen einfügen"
+          />
+        </>
+      )}
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-bold">Art der Karten</span>
-          <select className="select w-full" value={mode} onChange={(e) => setMode(e.target.value as GenerateMode)}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-bold opacity-70">Art der Karten</span>
+          <select
+            className="select select-sm w-full"
+            value={mode}
+            onChange={(e) => setMode(e.target.value as GenerateMode)}
+            title={GENERATE_MODE_LABELS[mode].hint}
+          >
             {GENERATE_MODES.map((key) => (
               <option key={key} value={key}>
                 {GENERATE_MODE_LABELS[key].label}
               </option>
             ))}
           </select>
-          <span className="text-sm opacity-70">{GENERATE_MODE_LABELS[mode].hint}</span>
         </label>
-
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-bold">
-            Schwerpunkt <span className="font-normal opacity-60">(optional)</span>
-          </span>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-bold opacity-70">Schwerpunkt (optional)</span>
           <input
-            className="input w-full"
+            className="input input-sm w-full"
             value={focus}
             onChange={(e) => setFocus(e.target.value)}
             maxLength={300}
-            placeholder="z. B. nur Definitionen und Voraussetzungen, Kapitel 3 auslassen"
+            placeholder="z. B. nur Definitionen"
           />
         </label>
-
-        {error && (
-          <p role="alert" className="alert alert-error alert-soft">
-            {error}
-          </p>
-        )}
+        <p className="-mt-1 text-xs opacity-60 sm:col-span-2">{GENERATE_MODE_LABELS[mode].hint}</p>
       </div>
 
+      {error && (
+        <p role="alert" className="text-sm text-error">
+          {error}
+        </p>
+      )}
+
       <div className="modal-action mt-0">
-        <button type="button" className="btn btn-ghost" onClick={onClose}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
           Abbrechen
         </button>
-        <button type="submit" className="btn btn-primary btn-chunky" disabled={pages.length === 0 || busy}>
+        <button type="submit" className="btn btn-primary btn-sm btn-chunky" disabled={pages.length === 0 || busy}>
           <Sparkles className="size-4" /> Karten vorschlagen
         </button>
       </div>
