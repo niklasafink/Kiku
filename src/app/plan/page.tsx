@@ -29,6 +29,7 @@ import {
   Wallet,
   type LucideIcon,
 } from "lucide-react";
+import { useAccount } from "@/components/Account";
 import { Modal } from "@/components/Modal";
 import { PlanForm } from "@/components/PlanForm";
 import { showToast } from "@/lib/toast";
@@ -113,6 +114,21 @@ function Bar({ progress, className = "" }: { progress: Progress; className?: str
 }
 
 export default function PlanPage() {
+  // Plans are generated and stored on the server; the local-only app has neither.
+  if (useAccount().mode === "local") {
+    return (
+      <div className="flex flex-col gap-5">
+        <h1 className="text-2xl font-black">Lernplan erstellen</h1>
+        <div role="note" className="alert alert-info alert-soft">
+          Lernpläne gibt es nur mit Konto, weil sie auf dem Server erstellt und gespeichert werden.
+        </div>
+      </div>
+    );
+  }
+  return <Plans />;
+}
+
+function Plans() {
   const [plan, setPlan] = useState<StudyPlan | null | undefined>(undefined);
   const [done, setDone] = useState<ReadonlySet<string>>(new Set());
   const [now] = useState(() => Date.now());

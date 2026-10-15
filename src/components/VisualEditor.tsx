@@ -120,7 +120,17 @@ export default function VisualEditor({
         return true;
       },
       // ⌘/Strg + Enter belongs to the form around the editor (save), not to the text.
-      handleKeyDown: (_view, event) => event.key === "Enter" && (event.metaKey || event.ctrlKey),
+      handleKeyDown: (view, event) => {
+        // The editor's keymap swallows Escape (it selects the parent node), so a dialog around it would stay open.
+        if (event.key === "Escape") {
+          const dialog = view.dom.closest("dialog");
+          if (!dialog?.open) return false;
+          if ("requestClose" in dialog) dialog.requestClose();
+          else (dialog as HTMLDialogElement).close();
+          return true;
+        }
+        return event.key === "Enter" && (event.metaKey || event.ctrlKey);
+      },
     },
     onUpdate: ({ editor: current }) => {
       const text = editorHtmlToMarkdown(current.getHTML());

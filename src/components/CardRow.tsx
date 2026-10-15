@@ -8,6 +8,9 @@ import type { Attempt, Card } from "@/lib/types";
 const FACE = "tile flex min-h-20 flex-col gap-1 px-4 py-3";
 const FACE_LABEL = "text-[0.68rem] font-extrabold tracking-wide uppercase opacity-50";
 
+/** The plain text of a card face, with list markers shown as bullets like on the card itself. */
+const preview = (text: string) => toPlainText(text).replace(/^(\s*)[-*+]\s+/gm, "$1• ");
+
 function Picture() {
   return (
     <span className="mt-auto flex items-center gap-1 text-xs font-semibold opacity-50">
@@ -46,7 +49,7 @@ export function CardRow({
             {!onToggle && <StarButton card={card} className="-my-1.5 -mr-2" />}
           </span>
         </span>
-        <span className="line-clamp-4 font-bold whitespace-pre-wrap">{toPlainText(card.question)}</span>
+        <span className="line-clamp-4 font-bold whitespace-pre-wrap">{preview(card.question)}</span>
         {imageIds(card.question).length > 0 && <Picture />}
         <TagList card={card} />
       </span>
@@ -56,7 +59,7 @@ export function CardRow({
           className={`line-clamp-4 whitespace-pre-wrap transition-[filter] ${showSolution ? "" : "blur-[5px] select-none"}`}
           aria-hidden={!showSolution}
         >
-          {toPlainText(card.solution)}
+          {preview(card.solution)}
         </span>
         {imageIds(card.solution).length > 0 && <Picture />}
       </span>

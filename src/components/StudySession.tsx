@@ -71,6 +71,7 @@ function GrowingTextarea(props: ComponentProps<"textarea">) {
 }
 
 function praise(score: number): string {
+  if (score >= 100) return "Perfekt, alles dabei!";
   if (score >= 90) return "Stark, fast alles dabei!";
   if (score >= 70) return "Gut, das meiste sitzt.";
   if (score >= 40) return "Ein Teil sitzt schon.";
@@ -463,7 +464,8 @@ export function StudySession({
       <div className="pop-in mx-auto flex w-full max-w-4xl flex-col gap-5">
         <div className="tile flex flex-col items-center gap-1.5 p-6 text-center">
           <p className="text-4xl" aria-hidden>
-            🎉
+            {/* Celebrate a good result, not a poor one. */}
+            {average !== null && average >= 50 ? "🎉" : "📝"}
           </p>
           <h1 className="text-2xl font-black">{exam ? "Prüfung ausgewertet" : "Geschafft!"}</h1>
           {average !== null ? (
@@ -527,11 +529,17 @@ export function StudySession({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <Link href={backHref} className="btn btn-ghost btn-sm" title="Lernen abbrechen und zurück">
+      <div className="flex flex-wrap items-center gap-2">
+        <Link href={backHref} className="btn btn-ghost btn-sm mr-auto sm:mr-0" title="Lernen abbrechen und zurück">
           <X className="size-4" /> Abbrechen
         </Link>
-        <progress className="progress progress-primary h-2.5 flex-1" value={answered} max={cards.length} aria-label="Fortschritt" />
+        {/* On phones the bar gets its own row; between the buttons it would shrink to a sliver. */}
+        <progress
+          className="progress progress-primary order-last h-2.5 basis-full sm:order-none sm:basis-0 sm:flex-1"
+          value={answered}
+          max={cards.length}
+          aria-label="Fortschritt"
+        />
         <div className="join">
           <button
             className="btn join-item btn-sm bg-base-100"
