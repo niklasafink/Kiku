@@ -12,18 +12,18 @@ export async function getStudyPlan(db: Database, userId: string): Promise<{ plan
   return row ?? null;
 }
 
-export async function hasStudyPlan(db: Database, userId: string): Promise<boolean> {
-  const [row] = await db.select({ userId: studyPlans.userId }).from(studyPlans).where(eq(studyPlans.userId, userId));
-  return Boolean(row);
-}
-
-/** Stores the plan of an account. Ticked steps are kept when the plan is replaced. */
-export async function putStudyPlan(db: Database, userId: string, plan: StudyPlan): Promise<void> {
+/** Stores the plan of an account. Ticked steps are kept when the plan is replaced, unless told otherwise. */
+export async function putStudyPlan(
+  db: Database,
+  userId: string,
+  plan: StudyPlan,
+  { keepDone = true }: { keepDone?: boolean } = {},
+): Promise<void> {
   const updatedAt = Date.now();
   await db
     .insert(studyPlans)
     .values({ userId, plan, done: [], updatedAt })
-    .onConflictDoUpdate({ target: studyPlans.userId, set: { plan, updatedAt } });
+    .onConflictDoUpdate({ target: studyPlans.userId, set: keepDone ? { plan, updatedAt } : { plan, done: [], updatedAt } });
 }
 
 /** Replaces the ticked steps. Returns false when the account has no plan. */

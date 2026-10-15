@@ -4,26 +4,39 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
+  Brain,
   Building2,
+  Calculator,
   CalendarDays,
+  ChartLine,
+  Code,
+  Cog,
   Factory,
   Flag,
+  FlaskConical,
   Gavel,
   Globe,
   Landmark,
+  Languages,
   ListChecks,
   Receipt,
+  RefreshCw,
   Scale,
+  Stethoscope,
   Timer,
+  TriangleAlert,
   Users,
   Wallet,
   type LucideIcon,
 } from "lucide-react";
+import { Modal } from "@/components/Modal";
+import { PlanForm } from "@/components/PlanForm";
 import { showToast } from "@/lib/toast";
 import {
   areaProgress,
   currentWeek,
   daysLeft,
+  formatMinutes,
   percent,
   stepKey,
   stepsOf,
@@ -35,6 +48,7 @@ import {
 } from "@/lib/studyPlan";
 
 const ICONS: Record<string, LucideIcon> = {
+  book: BookOpen,
   receipt: Receipt,
   scale: Scale,
   wallet: Wallet,
@@ -46,6 +60,14 @@ const ICONS: Record<string, LucideIcon> = {
   landmark: Landmark,
   timer: Timer,
   flag: Flag,
+  calculator: Calculator,
+  flask: FlaskConical,
+  brain: Brain,
+  code: Code,
+  languages: Languages,
+  stethoscope: Stethoscope,
+  chart: ChartLine,
+  cog: Cog,
 };
 const iconOf = (area: PlanArea | undefined) => ICONS[area?.icon ?? ""] ?? BookOpen;
 
@@ -94,6 +116,7 @@ export default function PlanPage() {
   const [plan, setPlan] = useState<StudyPlan | null | undefined>(undefined);
   const [done, setDone] = useState<ReadonlySet<string>>(new Set());
   const [now] = useState(() => Date.now());
+  const [creating, setCreating] = useState(false);
   // Writes go out one after the other, always with the latest state.
   const latest = useRef<string[] | null>(null);
   const saving = useRef(false);
@@ -151,6 +174,14 @@ export default function PlanPage() {
     void flush();
   };
 
+  const created = (next: StudyPlan) => {
+    latest.current = null;
+    setPlan(next);
+    setDone(new Set());
+    cache({ plan: next, done: [] });
+    setCreating(false);
+  };
+
   const areas = useMemo(() => new Map((plan?.areas ?? []).map((area) => [area.id, area])), [plan]);
 
   if (plan === undefined) return <div className="skeleton h-64 w-full rounded-box" />;
@@ -158,12 +189,9 @@ export default function PlanPage() {
   if (!plan) {
     return (
       <div className="flex flex-col gap-5">
-        <h1 className="text-2xl font-black">Lernplan</h1>
-        <div className="rounded-box border-2 border-dashed border-base-300 p-10 text-center">
-          <p className="text-lg font-bold">Für dieses Konto gibt es noch keinen Lernplan.</p>
-          <Link href="/" className="btn btn-primary btn-chunky mt-4">
-            Zur Bibliothek
-          </Link>
+        <h1 className="text-2xl font-black">Lernplan erstellen</h1>
+        <div className="tile mx-auto w-full max-w-3xl p-5">
+          <PlanForm replaces={false} onCreated={created} />
         </div>
       </div>
     );
@@ -177,7 +205,12 @@ export default function PlanPage() {
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <header className="flex flex-col gap-3">
-        <h1 className="text-2xl font-black">{plan.title}</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="mr-auto text-2xl font-black">{plan.title}</h1>
+          <button type="button" className="btn btn-sm btn-chunky bg-base-100" onClick={() => setCreating(true)}>
+            <RefreshCw className="size-4" /> Neuer Lernplan
+          </button>
+        </div>
         <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm font-semibold">
           <span>
             <span className="text-3xl font-black tabular-nums">{percent(total)} %</span> erledigt
@@ -192,6 +225,36 @@ export default function PlanPage() {
         </div>
         <Bar progress={total} className="h-3" />
       </header>
+
+      <Modal open={creating} onClose={() => setCreating(false)} title="Neuen Lernplan erstellen" wide>
+        <PlanForm replaces onCreated={created} onClose={() => setCreating(false)} />
+      </Modal>
+
+      {plan.tasksMissing && (
+        <div role="note" className="alert alert-warning alert-soft items-start">
+          <TriangleAlert className="size-5 shrink-0" aria-hidden />
+          <div className="flex flex-col gap-1 text-sm">
+            <p className="font-bold">In deinen Unterlagen sind keine Aufgaben.</p>
+            <p>
+              Lernen heißt Theorie verstehen und Aufgaben lösen. Lade Übungsblätter oder alte Klausuren nach, oder lass dir
+              Übungsfälle aus dem Skript erstellen: Öffne in der{" "}
+              <Link href="/" className="link font-semibold">
+                Bibliothek
+              </Link>{" "}
+              einen Ordner, wähle „Karten aus Unterlagen“ und als Art „Übungsfälle aus dem Skript“.
+            </p>
+          </div>
+        </div>
+      )}
+      {plan.shortfall && (
+        <div role="note" className="alert alert-warning alert-soft items-start">
+          <TriangleAlert className="size-5 shrink-0" aria-hidden />
+          <p className="text-sm">
+            <span className="font-bold">Die Zeit ist knapp.</span> Der Stoff braucht etwa {formatMinutes(plan.shortfall.needed)}, bis
+            zur Prüfung hast du {formatMinutes(plan.shortfall.available)}. Plane mehr Lernzeit ein oder setze Schwerpunkte.
+          </p>
+        </div>
+      )}
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" aria-label="Fortschritt je Bereich">
         {plan.areas.map((area) => {
@@ -267,7 +330,16 @@ export default function PlanPage() {
                                     {item.count}
                                   </span>
                                 )}
+                                {item.note && <span className="block text-xs font-normal opacity-60">{item.note}</span>}
                               </span>
+                              {item.minutes !== undefined && (
+                                <span
+                                  className="whitespace-nowrap text-xs font-bold tabular-nums opacity-60"
+                                  title="Geschätzte Zeit"
+                                >
+                                  {formatMinutes(item.minutes)}
+                                </span>
+                              )}
                               <span className="flex gap-1.5">
                                 {steps.map((step) => {
                                   const key = stepKey(item.id, step.key);

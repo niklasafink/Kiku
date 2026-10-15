@@ -3,6 +3,7 @@
 import { useRef, useState, type DragEvent } from "react";
 import { FileText, FileUp, Sparkles, Trash2, X } from "lucide-react";
 import { chunkPages } from "@/lib/chunks";
+import { GENERATE_MODE_LABELS, GENERATE_MODES, type GenerateMode } from "@/lib/generateModes";
 import { pluralize } from "@/lib/format";
 import { MATERIAL_ACCEPT, MaterialError, readMaterial } from "@/lib/material";
 
@@ -32,6 +33,7 @@ export function GenerateForm({
   const [material, setMaterial] = useState<{ name: string; pages: string[] } | null>(null);
   const [text, setText] = useState("");
   const [focus, setFocus] = useState("");
+  const [mode, setMode] = useState<GenerateMode>("auto");
   const [status, setStatus] = useState<Status>({ step: "idle" });
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -92,7 +94,7 @@ export function GenerateForm({
           const response = await fetch("/api/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: chunks[index], focus }),
+            body: JSON.stringify({ text: chunks[index], focus, mode }),
             signal: controller.signal,
           });
           const data = await response.json();
@@ -231,8 +233,8 @@ export function GenerateForm({
     >
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
         <p className="text-sm opacity-70">
-          Lade Vorlesungsfolien, ein Skript oder deine Notizen hoch (PDF, PowerPoint, Word, Text, Fotos) oder füge Text ein.
-          Die KI schlägt Karten mit Frage und ausformulierter Lösung vor; du prüfst sie, bevor etwas gespeichert wird.
+          Lade ein Skript, Folien, Übungsaufgaben oder alte Klausuren hoch (PDF, PowerPoint, Word, Text, Fotos) oder füge
+          Text ein. Die KI schlägt Karten mit Frage und ausformulierter Lösung vor; du prüfst sie, bevor etwas gespeichert wird.
         </p>
 
         {material ? (
@@ -285,6 +287,18 @@ export function GenerateForm({
             </label>
           </>
         )}
+
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-bold">Art der Karten</span>
+          <select className="select w-full" value={mode} onChange={(e) => setMode(e.target.value as GenerateMode)}>
+            {GENERATE_MODES.map((key) => (
+              <option key={key} value={key}>
+                {GENERATE_MODE_LABELS[key].label}
+              </option>
+            ))}
+          </select>
+          <span className="text-sm opacity-70">{GENERATE_MODE_LABELS[mode].hint}</span>
+        </label>
 
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-bold">

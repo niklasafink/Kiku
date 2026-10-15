@@ -28,9 +28,11 @@ async function readPicture(image: Blob): Promise<string> {
 }
 
 async function readPdf(data: ArrayBuffer, onProgress?: (done: number, total: number) => void): Promise<string[]> {
-  // Loaded on demand: the PDF reader is large and only needed here.
-  const pdfjs = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+  // Loaded on demand: the PDF reader is large and only needed here. The legacy build brings its own
+  // copies of brand-new functions (Promise.try, Map.getOrInsertComputed, Math.sumPrecise); with the
+  // modern build, browsers without them (Safari before 26.2, older Chrome) fail on every PDF.
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
   const task = pdfjs.getDocument({ data });
   const document = await task.promise;
   const pages: string[] = [];
@@ -105,6 +107,9 @@ export async function readMaterial(file: File, onProgress?: (done: number, total
     else throw new MaterialError("Dieses Format wird nicht unterstützt. Möglich sind PDF, PowerPoint (.pptx), Word (.docx), Text und Fotos.");
   } catch (error) {
     if (error instanceof MaterialError) throw error;
+    if ((error as Error | null)?.name === "PasswordException") {
+      throw new MaterialError("Die PDF ist mit einem Passwort geschützt. Speichere sie ohne Passwort und lade sie erneut hoch.");
+    }
     console.error(error);
     throw new MaterialError("Die Datei konnte nicht gelesen werden.");
   }

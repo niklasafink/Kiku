@@ -2,7 +2,6 @@ import { currentUser, SERVER_MODE } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { planOf } from "@/server/plan";
 import { AI_LIMITS, remainingQuota } from "@/server/quota";
-import { hasStudyPlan } from "@/server/studyPlan";
 
 export async function GET() {
   if (!SERVER_MODE) return Response.json({ user: null });
@@ -15,7 +14,5 @@ export async function GET() {
     plan === "admin"
       ? undefined
       : { remaining: await remainingQuota(getDb(), "ai", user.id, plan), limit: AI_LIMITS[plan] };
-  // Only accounts with a study plan get the link to it in the sidebar.
-  const studyPlan = await hasStudyPlan(getDb(), user.id);
-  return Response.json({ user: { ...user, plan, ai, hasStudyPlan: studyPlan } });
+  return Response.json({ user: { ...user, plan, ai } });
 }

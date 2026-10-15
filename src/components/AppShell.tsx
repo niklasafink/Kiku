@@ -361,7 +361,7 @@ function Shell({ children }: { children: ReactNode }) {
                 <StreakBadge />
               </Link>
             </li>
-            {account.mode === "server" && account.user?.hasStudyPlan && (
+            {account.mode === "server" && account.user && (
               <li>
                 <Link href="/plan" onClick={close} className={pathname === "/plan" ? "menu-active" : ""}>
                   <CalendarCheck className="size-5" />
