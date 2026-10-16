@@ -122,6 +122,14 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
   const [handsFree, setHandsFree] = useState(false);
   const [listen, setListen] = useState(0);
   const [remaining, setRemaining] = useState<number | null>(null);
+  // The reply while it is being written, and whether Kiku is looking something up for it.
+  const [streaming, setStreaming] = useState<string | null>(null);
+  const [lookingUp, setLookingUp] = useState(false);
+  const streamingText = useRef<string | null>(null);
+  const showStreaming = (text: string | null) => {
+    streamingText.current = text;
+    setStreaming(text);
+  };
 
   // What a running turn works on. The state above mirrors it for rendering.
   const live = useRef({ session: [] as SessionCard[], index: 0, messages: [] as TandemMessage[], done: false, handsFree: false });
@@ -149,7 +157,7 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [messages.length, phase]);
+  }, [messages.length, phase, streaming]);
 
   function play(base64: string): Promise<void> {
     return new Promise((resolve) => {
@@ -190,6 +198,15 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
     setPhase("thinking");
 
     const onCards = mode !== "free";
+    // The voiced pieces of the reply, played one after the other as they arrive.
+    let playback = Promise.resolve();
+    const enqueue = (audio: string | null, piece: string) => {
+      playback = playback.then(async () => {
+        if (id !== turnId.current) return;
+        if (audio) await play(audio);
+        else await speak(piece);
+      });
+    };
     try {
       const response = await fetch("/api/tandem", {
         method: "POST",
@@ -198,6 +215,7 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
         body: JSON.stringify({
           mode,
           folder: folder.name,
+          folderId: folder.id,
           knowledge,
           card: onCards ? (state.session[state.index]?.plain ?? null) : null,
           next: onCards ? (state.session[state.index + 1]?.plain ?? null) : null,
@@ -212,12 +230,34 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
         const data = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(data?.error || "Die Anfrage ist fehlgeschlagen. Bitte versuche es noch einmal.");
       }
-      const lines = jsonLines(response);
-      const reply = (await lines.next()).value as { text: string; advance: boolean; voiced: boolean; remaining: number | null };
-      if (id !== turnId.current) return;
+
+      let reply = null as { text: string; advance: boolean; voiced: boolean; remaining: number | null } | null;
+      for await (const event of jsonLines(response)) {
+        if (id !== turnId.current) return;
+        if (event.type === "lookup") setLookingUp(true);
+        else if (event.type === "text") {
+          setLookingUp(false);
+          streamingText.current = event.text as string;
+          setStreaming(streamingText.current);
+          setPhase("speaking");
+        } else if (event.type === "audio") enqueue((event.audio as string | null) ?? null, event.text as string);
+        else if (event.type === "done") reply = event as unknown as NonNullable<typeof reply>;
+        else if (event.type === "error") {
+          // What was written before the failure stays in the conversation.
+          if (event.text) {
+            state.messages = [...state.messages, { role: "assistant", text: event.text as string }];
+            setMessages(state.messages);
+          }
+          showStreaming(null);
+          throw new Error(event.error as string);
+        }
+      }
+      if (!reply) throw new Error("Die Antwort ist abgebrochen. Bitte versuche es noch einmal.");
 
       state.messages = [...state.messages, { role: "assistant", text: reply.text }];
       setMessages(state.messages);
+      showStreaming(null);
+      setLookingUp(false);
       setRemaining(reply.remaining);
       if (reply.advance && onCards) {
         if (state.index + 1 < state.session.length) {
@@ -231,15 +271,15 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
       }
       setPhase("speaking");
 
-      const audio = reply.voiced ? (((await lines.next().catch(() => null))?.value?.audio as string | null | undefined) ?? null) : null;
-      if (id !== turnId.current) return;
-      if (audio) await play(audio);
-      else await speak(reply.text);
+      if (!reply.voiced) enqueue(null, reply.text);
+      await playback;
       if (id !== turnId.current) return;
       setPhase("idle");
       if (state.handsFree && !state.done) setListen((n) => n + 1);
     } catch (e) {
       if (abort.signal.aborted || id !== turnId.current) return;
+      showStreaming(null);
+      setLookingUp(false);
       setError(
         !navigator.onLine
           ? "Das Tandem braucht eine Internetverbindung."
@@ -273,7 +313,16 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
   /** Stops the reply that is being spoken and hands the word back to the user. */
   function interrupt() {
     turnId.current += 1;
+    request.current?.abort();
     silence();
+    // What was already written stays in the conversation, so Kiku knows where it was cut off.
+    const text = streamingText.current;
+    if (text) {
+      live.current.messages = [...live.current.messages, { role: "assistant", text }];
+      setMessages(live.current.messages);
+    }
+    showStreaming(null);
+    setLookingUp(false);
     setPhase("idle");
   }
 
@@ -320,6 +369,7 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
             {knowledge.length < usable.length
               ? `Der Ordner ist sehr groß: Kiku kennt die ersten ${knowledge.length} von ${usable.length} Karten. Für den Rest wähle einen Unterordner.`
               : `Kiku kennt ${pluralize(usable.length, "Karte", "Karten")} aus diesem Ordner und seinen Unterordnern.`}
+            {account.mode === "server" && " Was hier fehlt, schlägt Kiku in deinen anderen Ordnern nach."}
           </span>
         </label>
 
@@ -439,10 +489,16 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
             <div className={`chat-bubble whitespace-pre-wrap ${message.role === "user" ? "chat-bubble-primary" : ""}`}>{message.text}</div>
           </div>
         ))}
-        {phase === "thinking" && (
+        {streaming && (
           <div className="chat chat-start">
-            <div className="chat-bubble">
-              <span className="loading loading-dots loading-sm" aria-label="Kiku überlegt" />
+            <div className="chat-bubble whitespace-pre-wrap">{streaming}</div>
+          </div>
+        )}
+        {(phase === "thinking" || lookingUp) && (
+          <div className="chat chat-start">
+            <div className="chat-bubble flex items-center gap-2">
+              <span className="loading loading-dots loading-sm" aria-label={lookingUp ? "Kiku schlägt nach" : "Kiku überlegt"} />
+              {lookingUp && <span className="text-sm opacity-70">schlägt nach</span>}
             </div>
           </div>
         )}

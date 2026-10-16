@@ -38,8 +38,8 @@ export const MAX_KNOWLEDGE_CARD_CHARS = 3_000;
 /** Earlier turns sent along. Older ones drop out; the cards themselves are always there. */
 export const MAX_HISTORY = 30;
 export const MAX_MESSAGE_CHARS = 6_000;
-/** Longest reply that is voiced: about a minute of speech. */
-export const MAX_SPOKEN_CHARS = 1_200;
+/** Longest reply that is voiced: about a minute and a half of speech. */
+export const MAX_SPOKEN_CHARS = 1_500;
 
 /** What the model appends when the conversation moves on to the next card. */
 export const NEXT_MARK = "[[NEXT]]";
@@ -84,6 +84,35 @@ export function parseReply(raw: string): { text: string; spoken: string; advance
     .trim();
   return { text, spoken, advance };
 }
+
+/** A reply still being written, as far as it can be shown: without a stage direction or mark that is only half there. */
+export function partialText(raw: string): string {
+  return parseReply(raw.replace(/\[[^\]\n]*$/, "")).text;
+}
+
+/**
+ * Where the next piece of a reply being written ends that can already be voiced, or -1.
+ * The first piece is a single sentence, so the voice starts as early as possible; later ones
+ * gather sentences up to a few hundred characters, which keeps the speech flowing.
+ * A sentence ends at . ! ? before a capital letter, but not after an abbreviation like "z. B." or "Abs.".
+ */
+export function speakableEnd(raw: string, from: number, first: boolean): number {
+  const target = first ? 1 : 220;
+  let end = -1;
+  const boundary = /([.!?:])\s+(?=[\p{Lu}\[„"])/gu;
+  boundary.lastIndex = from;
+  for (let match; (match = boundary.exec(raw)); ) {
+    const before = raw.slice(from, match.index);
+    const word = before.match(/(\p{L}+)$/u)?.[1] ?? "";
+    if (match[1] === "." && (word.length < 3 || ABBREVIATIONS.has(word))) continue;
+    if (before.replace(/\[[^\]]*\]/g, "").trim().length < 12) continue;
+    end = match.index + 1;
+    if (end - from >= target) return end;
+  }
+  return first ? -1 : end >= 0 && raw.length - from > 400 ? end : -1;
+}
+
+const ABBREVIATIONS = new Set(["Abs", "Nr", "Art", "bzw", "ggf", "inkl", "vgl", "sog", "Rz", "Rn", "Tz", "Buchst", "Anm", "Urt", "Az", "evtl", "insb", "zzgl", "abzgl", "max", "min", "ca", "BMF", "Std"]);
 
 /** Cuts an overlong reply after the last full sentence that still fits. */
 function clip(text: string): string {

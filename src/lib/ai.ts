@@ -12,8 +12,12 @@ export const FREE_PLAN_GRADING_MODELS = process.env.FREE_PLAN_GRADING_MODELS?.sp
   "inclusionai/ling-3.0-flash-vl",
 ];
 export const TRANSCRIBE_MODEL = process.env.TRANSCRIBE_MODEL || "google/gemini-3.8-flash";
-// The study tandem: the model that talks, and the one that gives it a voice.
-export const TANDEM_MODEL = process.env.TANDEM_MODEL || GRADING_MODEL;
+// The study tandem: the model that talks, a small one that answers straight away (the fallback, and the
+// model of the free plan), and the one that gives them a voice. Measured with a full prompt and the knowledge
+// base: Sonnet 5.5 with minimal reasoning about 2 s to the first word, Haiku 5.5 without 1.3 s,
+// gpt-6-luna with low reasoning 13 s.
+export const TANDEM_MODEL = process.env.TANDEM_MODEL || "anthropic/claude-sonnet-5.5";
+export const TANDEM_FAST_MODEL = process.env.TANDEM_FAST_MODEL || "anthropic/claude-haiku-5.5";
 export const SPEECH_MODEL = process.env.SPEECH_MODEL || "elevenlabs/eleven-v4-turbo";
 
 export class MissingKeyError extends Error {

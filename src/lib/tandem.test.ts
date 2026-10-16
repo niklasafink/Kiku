@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { knowledgeOf, MAX_KNOWLEDGE_CARD_CHARS, MAX_SPOKEN_CHARS, parseReply, tandemCard } from "./tandem";
+import { knowledgeOf, MAX_KNOWLEDGE_CARD_CHARS, MAX_SPOKEN_CHARS, parseReply, partialText, speakableEnd, tandemCard } from "./tandem";
 
 describe("tandemCard", () => {
   it("strips markup and pictures", () => {
@@ -49,5 +49,33 @@ describe("parseReply", () => {
     const reply = parseReply("Ein Satz. ".repeat(300));
     expect(reply.spoken.length).toBeLessThanOrEqual(MAX_SPOKEN_CHARS);
     expect(reply.spoken.endsWith(".")).toBe(true);
+  });
+});
+
+describe("partialText", () => {
+  it("hides a stage direction or mark that is only half written", () => {
+    expect(partialText("[warm")).toBe("");
+    expect(partialText("[warmly] Okay, fast. [[NE")).toBe("Okay, fast.");
+  });
+});
+
+describe("speakableEnd", () => {
+  it("voices the first sentence on its own", () => {
+    const raw = "[warmly] Im Kern ja, aber das ist zu eng. Eine vGA";
+    expect(raw.slice(0, speakableEnd(raw, 0, true))).toBe("[warmly] Im Kern ja, aber das ist zu eng.");
+  });
+
+  it("waits while the first sentence is not finished", () => {
+    expect(speakableEnd("[warmly] Im Kern ja, aber", 0, true)).toBe(-1);
+  });
+
+  it("does not end a sentence after an abbreviation or a norm", () => {
+    const raw = "Nach § 8 Abs. 3 S. 2 KStG gilt z. B. Folgendes für die Gesellschaft. Weiter";
+    expect(raw.slice(0, speakableEnd(raw, 0, true))).toBe("Nach § 8 Abs. 3 S. 2 KStG gilt z. B. Folgendes für die Gesellschaft.");
+  });
+
+  it("gathers later sentences into longer pieces", () => {
+    const raw = "Erster Satz ist hier. Zweiter Satz kommt jetzt. Dritter";
+    expect(speakableEnd(raw, 21, false)).toBe(-1);
   });
 });
