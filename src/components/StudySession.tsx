@@ -628,7 +628,7 @@ export function StudySession({
                     title="Lösung unter der Frage einblenden und trotzdem antworten"
                   >
                     {peeking ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                    <span className="hidden sm:inline">Spicken</span>
+                    Spicken
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
