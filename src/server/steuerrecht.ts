@@ -18,6 +18,9 @@ function config(): Config | null {
   const url = process.env.STEUERRECHT_MCP_URL;
   if (!url) return null;
   const { STEUERRECHT_MCP_USER: user, STEUERRECHT_MCP_PASSWORD: password } = process.env;
+  const local = /^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(url);
+  // The public server needs a login; without one every lookup would only fail and cost time.
+  if (!local && !(user && password)) return null;
   return { base: url.replace(/\/mcp\/?$/, "").replace(/\/$/, ""), user, password };
 }
 
