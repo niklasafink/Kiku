@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
-import { ArrowLeft, ArrowRight, Check, CloudOff, Eye, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CloudOff, Eye, EyeOff, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, X } from "lucide-react";
 import { useAccount } from "@/components/Account";
 import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
 import { Handwriting } from "@/components/Handwriting";
@@ -108,6 +108,8 @@ export function StudySession({
   const [handedIn, setHandedIn] = useState(!exam);
   const [handingIn, setHandingIn] = useState(false);
   const [explainingId, setExplainingId] = useState<string | null>(null);
+  // The card whose solution is shown under the question while it is still being answered.
+  const [peekId, setPeekId] = useState<string | null>(null);
   // Lets "Abbrechen" stop a grading or hand-in that is running.
   const abort = useRef<AbortController | null>(null);
   // Hands-free: the question is read aloud, the answer recorded and graded, the result read out, then the next card.
@@ -526,6 +528,8 @@ export function StudySession({
   const strokes = state.ink ?? [];
   // Writing by hand needs room: the answer side gets two thirds of the width.
   const writing = mode === "pen" && !attempt && !state.revealed && !state.pending;
+  const answering = handedIn && !attempt && !state.revealed && !state.pending;
+  const peeking = answering && peekId === card.id;
 
   return (
     <div className="flex flex-col gap-3">
@@ -535,7 +539,7 @@ export function StudySession({
         </Link>
         {/* On phones the bar gets its own row; between the buttons it would shrink to a sliver. */}
         <progress
-          className="progress progress-primary order-last h-2.5 basis-full sm:order-none sm:basis-0 sm:flex-1"
+          className="progress progress-primary order-last h-1.5 basis-full sm:order-none sm:min-w-12 sm:basis-0 sm:flex-1"
           value={answered}
           max={cards.length}
           aria-label="Fortschritt"
@@ -592,6 +596,70 @@ export function StudySession({
             <Shuffle className="size-4" />
           </button>
         )}
+        {/* The actions; on phones they get a row of their own with the main one stretched. */}
+        <div className="flex basis-full items-center gap-2 sm:basis-auto">
+          {!handedIn ? (
+            <button className="btn btn-primary btn-sm flex-1 sm:flex-none" onClick={() => go(index + 1)} title="⌘/Strg + Enter">
+              {index + 1 < cards.length ? "Weiter" : "Zur Abgabe"} <ArrowRight className="size-4" />
+            </button>
+          ) : !answering ? (
+            <>
+              {!state.pending && (
+                <button className="btn btn-sm bg-base-100" onClick={() => patch(card.id, { ...EMPTY, usedPen: false, ink: [] })}>
+                  <RotateCcw className="size-4" /> {attempt ? "Nochmal" : "Doch antworten"}
+                </button>
+              )}
+              <button className="btn btn-primary btn-sm flex-1 sm:flex-none" onClick={() => go(index + 1)}>
+                {index + 1 < cards.length ? "Weiter" : "Abschließen"} <ArrowRight className="size-4" />
+              </button>
+            </>
+          ) : (
+            <>
+              {grading ? (
+                <button className="btn btn-ghost btn-sm" onClick={cancelGrading}>
+                  <X className="size-4" /> Abbrechen
+                </button>
+              ) : (
+                <>
+                  <button
+                    className={`btn btn-sm ${peeking ? "btn-active" : "btn-ghost"}`}
+                    aria-pressed={peeking}
+                    onClick={() => setPeekId(peeking ? null : card.id)}
+                    title="Lösung unter der Frage einblenden und trotzdem antworten"
+                  >
+                    {peeking ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    <span className="hidden sm:inline">Spicken</span>
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => patch(card.id, { revealed: true })}
+                    title="Lösung ansehen, ohne zu antworten"
+                  >
+                    <span className="hidden sm:inline">Lösung zeigen</span>
+                    <span className="sm:hidden">Lösung</span>
+                  </button>
+                </>
+              )}
+              <button
+                className="btn btn-primary btn-sm flex-1 sm:flex-none"
+                onClick={() => void grade(card)}
+                disabled={grading || !isAnswered(card)}
+                title="⌘/Strg + Enter"
+              >
+                {grading ? (
+                  <>
+                    <span className="loading loading-spinner loading-xs" />{" "}
+                    {hasInk(strokes) ? "KI liest deine Handschrift …" : "KI gleicht ab …"}
+                  </>
+                ) : (
+                  <>
+                    <Check className="size-4" /> Fertig
+                  </>
+                )}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div key={card.id} className={`grid items-start gap-3 ${writing ? "md:grid-cols-[1fr_2fr]" : "md:grid-cols-2"}`}>
@@ -609,6 +677,13 @@ export function StudySession({
             </div>
             <RichText text={card.question} className="mt-1 text-lg font-extrabold" />
           </section>
+
+          {peeking && (
+            <section className="tile pop-in p-4">
+              <h2 className={`mb-1.5 ${LABEL}`}>Lösung</h2>
+              <RichText text={card.solution} className="leading-relaxed" />
+            </section>
+          )}
 
           {attempt && (
             <>
@@ -774,53 +849,6 @@ export function StudySession({
             </p>
           )}
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            {!handedIn ? (
-              <button className="btn btn-primary btn-chunky flex-1" onClick={() => go(index + 1)} title="⌘/Strg + Enter">
-                {index + 1 < cards.length ? "Weiter" : "Zur Abgabe"} <ArrowRight className="size-4" />
-              </button>
-            ) : attempt || state.revealed || state.pending ? (
-              <>
-                {!state.pending && (
-                  <button className="btn btn-chunky bg-base-100" onClick={() => patch(card.id, { ...EMPTY, usedPen: false, ink: [] })}>
-                    <RotateCcw className="size-4" /> {attempt ? "Nochmal" : "Doch antworten"}
-                  </button>
-                )}
-                <button className="btn btn-primary btn-chunky flex-1" onClick={() => go(index + 1)}>
-                  {index + 1 < cards.length ? "Weiter" : "Abschließen"} <ArrowRight className="size-4" />
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className="btn btn-primary btn-chunky flex-1"
-                  onClick={() => void grade(card)}
-                  disabled={grading || !isAnswered(card)}
-                  title="⌘/Strg + Enter"
-                >
-                  {grading ? (
-                    <>
-                      <span className="loading loading-spinner loading-sm" />{" "}
-                      {hasInk(strokes) ? "KI liest deine Handschrift …" : "KI gleicht ab …"}
-                    </>
-                  ) : (
-                    <>
-                      <Check className="size-4" /> Fertig
-                    </>
-                  )}
-                </button>
-                {grading ? (
-                  <button className="btn btn-ghost" onClick={cancelGrading}>
-                    <X className="size-4" /> Abbrechen
-                  </button>
-                ) : (
-                  <button className="btn btn-ghost" onClick={() => patch(card.id, { revealed: true })}>
-                    <Eye className="size-4" /> Lösung zeigen
-                  </button>
-                )}
-              </>
-            )}
-          </div>
         </div>
       </div>
     </div>
