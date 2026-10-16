@@ -110,6 +110,9 @@ export function StudySession({
   const [explainingId, setExplainingId] = useState<string | null>(null);
   // The card whose solution is shown under the question while it is still being answered.
   const [peekId, setPeekId] = useState<string | null>(null);
+  // While peeking, question and answer side fill the window below the bar and scroll each on their own.
+  const split = useRef<HTMLDivElement>(null);
+  const [splitTop, setSplitTop] = useState(0);
   // Lets "Abbrechen" stop a grading or hand-in that is running.
   const abort = useRef<AbortController | null>(null);
   // Hands-free: the question is read aloud, the answer recorded and graded, the result read out, then the next card.
@@ -161,6 +164,18 @@ export function StudySession({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   });
+
+  const peeking = handedIn && card !== null && peekId === card.id && !state.attempt && !state.revealed && !state.pending;
+  useLayoutEffect(() => {
+    if (!peeking) return;
+    const measure = () => {
+      const element = split.current;
+      if (element) setSplitTop(element.getBoundingClientRect().top + window.scrollY);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [peeking]);
 
   function chooseMode(next: AnswerMode) {
     setMode(next);
@@ -529,7 +544,7 @@ export function StudySession({
   // Writing by hand needs room: the answer side gets two thirds of the width.
   const writing = mode === "pen" && !attempt && !state.revealed && !state.pending;
   const answering = handedIn && !attempt && !state.revealed && !state.pending;
-  const peeking = answering && peekId === card.id;
+  const column = peeking ? "md:min-h-0 md:overflow-y-auto md:overscroll-contain md:pb-1" : "";
 
   return (
     <div className="flex flex-col gap-3">
@@ -662,9 +677,16 @@ export function StudySession({
         </div>
       </div>
 
-      <div key={card.id} className={`grid items-start gap-3 ${writing ? "md:grid-cols-[1fr_2fr]" : "md:grid-cols-2"}`}>
+      <div
+        key={card.id}
+        ref={split}
+        className={`grid gap-3 ${writing ? "md:grid-cols-[1fr_2fr]" : "md:grid-cols-2"} ${
+          peeking ? "items-start md:h-[calc(100dvh-var(--split-top)-1rem)] md:grid-rows-[minmax(0,1fr)] md:items-stretch" : "items-start"
+        }`}
+        style={peeking ? ({ "--split-top": `${splitTop}px` } as React.CSSProperties) : undefined}
+      >
         {/* Left: the question, later also the score and what you answered. */}
-        <div className="flex flex-col gap-3 md:sticky md:top-3">
+        <div className={`flex flex-col gap-3 ${peeking ? column : "md:sticky md:top-3"}`}>
           <section className="tile pop-in p-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className={`mr-auto ${LABEL}`}>Frage</h2>
@@ -744,7 +766,7 @@ export function StudySession({
         </div>
 
         {/* Right: answer input first, then the solution. */}
-        <div className="flex flex-col gap-3">
+        <div className={`flex flex-col gap-3 ${column}`}>
           {attempt ? (
             <>
             <section className="tile pop-in p-4">
