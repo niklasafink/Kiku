@@ -1,6 +1,6 @@
 import { requireUser } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { getImage, IMAGE_TYPES, isImageId, MAX_IMAGE_BYTES, putImage } from "@/server/images";
+import { getImage, IMAGE_TYPES, isImageId, MAX_IMAGE_BYTES, MAX_PDF_BYTES, putImage } from "@/server/images";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -26,7 +26,7 @@ export async function PUT(request: Request, { params }: Context) {
   }
   const bytes = new Uint8Array(await request.arrayBuffer());
   if (bytes.byteLength === 0) return Response.json({ error: "Ungültiges Bild." }, { status: 400 });
-  if (bytes.byteLength > MAX_IMAGE_BYTES) return Response.json({ error: "Das Bild ist zu groß." }, { status: 413 });
+  if (bytes.byteLength > (mime === "application/pdf" ? MAX_PDF_BYTES : MAX_IMAGE_BYTES)) return Response.json({ error: "Das Bild ist zu groß." }, { status: 413 });
 
   const result = await putImage(getDb(), user.id, { id, mime, bytes });
   if (result === "taken") return Response.json({ error: "Diese Kennung ist vergeben." }, { status: 409 });

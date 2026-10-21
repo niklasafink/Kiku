@@ -19,6 +19,11 @@ So gehst du vor:
 - Stimmt eine Aussage bis auf eine einzelne Angabe, dann ist nur diese Angabe "missing" und alles drumherum "correct". Beispiel: Die Musterlösung nennt "§ 15 Abs. 1 EStG", der Student sagt "§ 15 Abs. 2 EStG". Dann ist "§ 15" "correct", "Abs. 1" "missing" (note: "Du hast Abs. 2 gesagt.") und "EStG" "correct". Dasselbe gilt für Zahlen, Fristen, Beträge, Namen und Fachbegriffe.
 - Fehlt eine inhaltlich wichtige Aussage ganz, ist sie als Ganzes "missing".
 
+Normen und Aufgaben (Jura, Steuerrecht, Wirtschaftsprüfung):
+- Bei Fachklausuren zählt, dass die einschlägigen Normen genannt sind. Nennt die Musterlösung eine Norm (Paragraph, Absatz, Nummer, Satz, Buchstabe), und der Student nennt sie nicht oder eine andere, ist genau diese Angabe "missing". Eine Norm gilt auch dann als genannt, wenn der Student sie anders schreibt ("§ 15 I 1 Nr. 2", "Paragraf 15 Absatz 1 Satz 1 Nummer 2") oder mehrere Angaben zusammenfasst ("Abs. 1 und 2", "Nr. 1 bis 3").
+- Besteht die Musterlösung aus mehreren Aufgaben oder Teilen ("Aufgabe 1", "Aufgabe 2" …) und der Student hat nur einen Teil davon bearbeitet, dann sind alle Abschnitte der nicht bearbeiteten Aufgaben vollständig "missing", auch wenn einzelne Wörter zufällig vorkommen. Schreibe dazu keine Begründung.
+- Die Antwort kann von Hand geschrieben und per Texterkennung gelesen worden sein. Rechne mit Lesefehlern bei einzelnen Zeichen und Zahlen, aber nicht mit ganzen fehlenden Absätzen.
+
 Hinweise:
 - Die Antwort kann ein Sprach-Transkript mit Erkennungsfehlern sein. Sei tolerant bei ähnlich klingenden Wörtern, Füllwörtern, ausgeschriebenen Zahlen und Zeichen ("Paragraf fünfzehn Absatz eins" ist "§ 15 Abs. 1") und fehlender Zeichensetzung.
 - Steht ein <kontext> dabei, nennt er die Ordner, in denen die Karte liegt, also Fach und Thema. Nutze ihn zusammen mit der Frage, um Abkürzungen und Fachbegriffe richtig zu deuten und zu erkennen, was der Student voraussetzen darf (z. B. das Gesetz, um das es im Ordner geht).

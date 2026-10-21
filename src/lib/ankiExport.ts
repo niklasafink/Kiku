@@ -3,7 +3,7 @@
 // because every Anki version on every platform still imports it.
 import { decodeEntities, markdownToHtml } from "./html";
 import { occlusionAlt, parseOcclusion, type ImageFile, type Occlusion } from "./occlusion";
-import { IMAGE_SCHEME, imageExtension, imageRefs } from "./richText";
+import { IMAGE_SCHEME, imageExtension, imageRefs, isPdfAlt } from "./richText";
 import { writeSqlite, type SqlWriteValue } from "./sqliteWrite";
 import { pathTo } from "./tree";
 import type { Card, Folder } from "./types";
@@ -341,7 +341,7 @@ async function collectMedia(
     return name;
   };
   for (const card of cards) {
-    for (const { id, alt } of imageRefs(`${card.question}\n${card.solution}`)) {
+    for (const { id, alt } of imageRefs(`${card.question}\n${card.solution}`).filter((ref) => !isPdfAlt(ref.alt))) {
       const { key, occlusion } = mediaKey(id, alt);
       if (files.has(key)) continue;
       if (!originals.has(id)) originals.set(id, await image(id));

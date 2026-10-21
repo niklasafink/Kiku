@@ -6,7 +6,9 @@ import { cards, images } from "./schema";
 
 /** The browser scales pictures down to 1.5 MB at most; a little room on top. */
 export const MAX_IMAGE_BYTES = 2_000_000;
-export const IMAGE_TYPES = ["image/webp", "image/jpeg", "image/png", "image/gif"];
+/** A PDF (task or solution of a card): as much as a request body may hold, see lib/pdfLimits.ts. */
+export const MAX_PDF_BYTES = 4_200_000;
+export const IMAGE_TYPES = ["image/webp", "image/jpeg", "image/png", "image/gif", "application/pdf"];
 /** Far more than a library needs; stops an account from filling the database. */
 export const MAX_IMAGES_PER_USER = 5000;
 

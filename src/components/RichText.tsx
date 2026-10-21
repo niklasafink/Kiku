@@ -1,12 +1,12 @@
 "use client";
 
 import { createContext, Fragment, useContext, useEffect, useState, type ReactNode } from "react";
-import { ImageOff } from "lucide-react";
+import { FileText, ImageOff } from "lucide-react";
 import { imageUrl } from "@/lib/images";
 // Layout and fonts of typeset formulas.
 import "katex/dist/katex.min.css";
 import { parseOcclusion, type Occlusion } from "@/lib/occlusion";
-import { parseBlocks, type Inline } from "@/lib/richText";
+import { isPdfAlt, PDF_ALT, parseBlocks, type Inline } from "@/lib/richText";
 
 /**
  * Where pictures come from when the cards are not the viewer's own (a shared deck): a URL that
@@ -142,6 +142,14 @@ function renderInline(inlines: Inline[], overlay?: Overlay): ReactNode {
         return <Fragment key={i}>{overlay ? overlay.formula(inline.tex, formula, false) : formula}</Fragment>;
       }
       case "image": {
+        if (isPdfAlt(inline.alt)) {
+          return (
+            <span key={i} className="badge badge-soft my-0.5 mr-1 gap-1 py-3 font-semibold">
+              <FileText className="size-3.5" aria-hidden />
+              <span className="max-w-48 truncate">{inline.alt.slice(PDF_ALT.length)}</span>
+            </span>
+          );
+        }
         const occlusion = parseOcclusion(inline.alt);
         if (occlusion) return <OccludedImage key={i} id={inline.id} occlusion={occlusion} />;
         return <CardImage key={i} id={inline.id} alt={inline.alt} className="my-1 block" />;

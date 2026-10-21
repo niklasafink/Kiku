@@ -152,6 +152,40 @@ export function imageMarkup(id: string): string {
   return `![](${IMAGE_SCHEME}${id})`;
 }
 
+/** A PDF is attached to a card like a picture, with the alternative text "pdf:<file name>". */
+export const PDF_ALT = "pdf:";
+
+export const isPdfAlt = (alt: string) => alt.startsWith(PDF_ALT);
+
+export function pdfMarkup(id: string, name: string): string {
+  const clean = name.replace(/[\][\n]/g, "").replace(/\.pdf$/i, "").trim().slice(0, 80) || "Dokument";
+  return `![${PDF_ALT}${clean}.pdf](${IMAGE_SCHEME}${id})`;
+}
+
+/** The PDFs attached to a text, in order. */
+export function pdfRefs(text: string): { id: string; name: string }[] {
+  return imageRefs(text)
+    .filter((ref) => isPdfAlt(ref.alt))
+    .map((ref) => ({ id: ref.id, name: ref.alt.slice(PDF_ALT.length) || "Dokument.pdf" }));
+}
+
+/** The text without its attached PDFs, and the PDFs. The editors only ever see the text. */
+export function splitPdfs(text: string): { body: string; pdfs: { id: string; name: string }[] } {
+  const pdfs = pdfRefs(text);
+  if (pdfs.length === 0) return { body: text, pdfs };
+  const body = text
+    .replace(IMAGE_ALL, (whole, alt: string) => (isPdfAlt(alt) ? "" : whole))
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { body, pdfs };
+}
+
+/** Puts attached PDFs behind a text, each on a line of its own. */
+export function joinPdfs(body: string, pdfs: { id: string; name: string }[]): string {
+  const marks = pdfs.map((pdf) => pdfMarkup(pdf.id, pdf.name)).join("\n\n");
+  return marks ? (body.trim() ? `${body.trimEnd()}\n\n${marks}` : marks) : body;
+}
+
 const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -160,6 +194,7 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/avif": "avif",
   "image/bmp": "bmp",
   "image/svg+xml": "svg",
+  "application/pdf": "pdf",
 };
 
 /** File extension for a picture of this media type, for the exports that write pictures as files. */

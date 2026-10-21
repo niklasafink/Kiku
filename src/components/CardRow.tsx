@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Image as ImageIcon } from "lucide-react";
 import { ScoreBadge } from "@/components/score";
 import { StarButton, TagList } from "@/components/Tags";
-import { imageIds, toPlainText } from "@/lib/richText";
+import { imageRefs, isPdfAlt, toPlainText } from "@/lib/richText";
 import type { Attempt, Card } from "@/lib/types";
 
 const FACE = "tile flex min-h-20 flex-col gap-1 px-4 py-3";
@@ -10,6 +10,9 @@ const FACE_LABEL = "text-[0.68rem] font-extrabold tracking-wide uppercase opacit
 
 /** The plain text of a card face, with list markers shown as bullets like on the card itself. */
 const preview = (text: string) => toPlainText(text).replace(/^(\s*)[-*+]\s+/gm, "$1• ");
+
+/** The text shows a picture (a PDF attached to it does not count). */
+const hasPicture = (text: string) => imageRefs(text).some((ref) => !isPdfAlt(ref.alt));
 
 function Picture() {
   return (
@@ -50,7 +53,7 @@ export function CardRow({
           </span>
         </span>
         <span className="line-clamp-4 font-bold whitespace-pre-wrap">{preview(card.question)}</span>
-        {imageIds(card.question).length > 0 && <Picture />}
+        {hasPicture(card.question) && <Picture />}
         <TagList card={card} />
       </span>
       <span className={FACE}>
@@ -61,7 +64,7 @@ export function CardRow({
         >
           {preview(card.solution)}
         </span>
-        {imageIds(card.solution).length > 0 && <Picture />}
+        {hasPicture(card.solution) && <Picture />}
       </span>
     </span>
   );

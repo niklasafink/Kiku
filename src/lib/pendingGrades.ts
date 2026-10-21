@@ -3,6 +3,7 @@
 // schedule see it on the right day.
 import { recognizeInk } from "./ink";
 import { db } from "./db";
+import { markNorms } from "./norms";
 import { addAttempt, deletePendingAnswer, pendingAnswers } from "./repo";
 import { toPlainText } from "./richText";
 import { pathTo } from "./tree";
@@ -35,14 +36,16 @@ async function gradeOne(entry: PendingAnswer): Promise<"graded" | "dropped" | "l
   // Used-up allowance, server trouble: the answer keeps waiting.
   if (!response.ok) return "later";
   const data = await response.json();
+  // Norms of the solution the answer does not name are marked on top of what the AI found.
+  const marked = markNorms(data.segments as Segment[], answer);
   await addAttempt({
     cardId: entry.cardId,
     createdAt: entry.createdAt,
     inputMode: entry.inputMode,
     answerText: answer.trim(),
     solutionSnapshot: entry.solutionSnapshot,
-    segments: data.segments as Segment[],
-    score: data.score as number,
+    segments: marked.segments,
+    score: marked.score,
   });
   return "graded";
 }

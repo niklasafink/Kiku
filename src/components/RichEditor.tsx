@@ -11,11 +11,12 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Bold, Code, Eye, Heading, Highlighter, ImagePlus, Italic, List, ListOrdered, Pencil, Sigma, Table } from "lucide-react";
+import { Bold, Code, Eye, FileText, Heading, Highlighter, ImagePlus, Italic, List, ListOrdered, Pencil, Sigma, Table, X } from "lucide-react";
 import { CardImage, RichText } from "@/components/RichText";
 import { ImageError, saveImage } from "@/lib/images";
 import { parseTable } from "@/lib/importCards";
-import { imageIds, imageMarkup, toMarkdownTable } from "@/lib/richText";
+import { isPdf, PdfError, pdfText, savePdf } from "@/lib/pdfFiles";
+import { imageIds, imageMarkup, joinPdfs, splitPdfs, toMarkdownTable } from "@/lib/richText";
 import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
 
 const EMPTY_TABLE = "| Spalte 1 | Spalte 2 |\n| --- | --- |\n|  |  |";
@@ -51,10 +52,118 @@ function storedSource(): boolean {
 }
 
 /**
- * Field for one side of a card. Normally it shows the text the way the card will look; the
- * source view shows the same text with its markup, for those who prefer to type it.
+ * Field for one side of a card, with PDFs that can be attached to it. The PDFs are part of the
+ * card text (see pdfMarkup) but never reach the editors below: they edit the text without them.
  */
 export function RichEditor(props: EditorProps) {
+  const { body, pdfs } = splitPdfs(props.value);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: "info" | "error"; text: string } | null>(null);
+  const latest = useRef({ props, body, pdfs });
+  useLayoutEffect(() => {
+    latest.current = { props, body, pdfs };
+  });
+
+  async function attach(files: File[]) {
+    const found = files.filter(isPdf);
+    if (found.length === 0) return;
+    setNotice(null);
+    try {
+      for (const file of found) {
+        setBusy("PDF wird gespeichert …");
+        const id = await savePdf(file);
+        setBusy("Text wird aus der PDF gelesen …");
+        const { text, cut } = await pdfText(file, (done, total) => setBusy(`Text wird gelesen … Seite ${done} von ${total}`));
+        const current = latest.current;
+        const room = MAX_CARD_TEXT - 200 * (current.pdfs.length + 1);
+        const joined = text ? (current.body.trim() ? `${current.body.trimEnd()}\n\n${text}` : text) : current.body;
+        const nextBody = joined.length > room ? joined.slice(0, room) : joined;
+        const next = joinPdfs(nextBody, [...current.pdfs, { id, name: file.name }]);
+        // The next file builds on this result, not on the text from before.
+        latest.current = { ...current, body: nextBody, pdfs: [...current.pdfs, { id, name: file.name }] };
+        current.props.onChange(next);
+        setNotice({
+          tone: text ? "info" : "error",
+          text: !text
+            ? "Aus der PDF ließ sich kein Text lesen. Sie bleibt als Ansicht erhalten, wird aber nicht automatisch abgeglichen."
+            : cut || joined.length > room
+              ? "PDF angehängt, ihr Text wurde auf die erlaubte Länge gekürzt."
+              : "PDF angehängt, ihr Text steht jetzt im Feld und wird beim Abgleich genutzt.",
+        });
+      }
+    } catch (e) {
+      setNotice({ tone: "error", text: e instanceof PdfError ? e.message : "Die PDF konnte nicht gespeichert werden." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div
+      className={`flex min-w-0 flex-col gap-1.5 ${props.fill ? "min-h-0 flex-1" : ""}`}
+      onDropCapture={(event) => {
+        const files = [...event.dataTransfer.files];
+        if (!files.some(isPdf)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void attach(files);
+      }}
+    >
+      <TextEditor {...props} value={body} onChange={(text) => props.onChange(joinPdfs(text, pdfs))} />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          className="btn btn-ghost btn-xs"
+          onClick={() => fileInput.current?.click()}
+          disabled={busy !== null}
+          title="PDF anhängen, z. B. die Aufgabe oder die Musterlösung. Sie lässt sich beim Üben in einem Reader ansehen."
+        >
+          {busy ? <span className="loading loading-spinner loading-xs" /> : <FileText className="size-4" />}
+          {busy ?? "PDF anhängen"}
+        </button>
+        {pdfs.map((pdf) => (
+          <span key={pdf.id} className="badge badge-soft gap-1 py-3 font-semibold">
+            <FileText className="size-3.5" aria-hidden />
+            <span className="max-w-40 truncate">{pdf.name}</span>
+            <button
+              type="button"
+              className="opacity-60 hover:opacity-100"
+              aria-label={`${pdf.name} entfernen`}
+              title="PDF entfernen (der Text bleibt)"
+              onClick={() => props.onChange(joinPdfs(body, pdfs.filter((p) => p.id !== pdf.id)))}
+            >
+              <X className="size-3.5" />
+            </button>
+          </span>
+        ))}
+        <input
+          ref={fileInput}
+          type="file"
+          accept="application/pdf,.pdf"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            const files = [...(e.target.files ?? [])];
+            e.target.value = "";
+            void attach(files);
+          }}
+        />
+      </div>
+      {notice && (
+        <p role={notice.tone === "error" ? "alert" : "status"} className={`text-xs ${notice.tone === "error" ? "text-error" : "opacity-70"}`}>
+          {notice.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The text of one side of a card. Normally it shows the text the way the card will look; the
+ * source view shows the same text with its markup, for those who prefer to type it.
+ */
+function TextEditor(props: EditorProps) {
   const [source, setSource] = useState(storedSource);
   const modeSwitch = (
     <button

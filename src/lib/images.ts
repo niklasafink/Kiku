@@ -2,6 +2,7 @@
 // account, uploaded once so other devices can fetch them when a card shows them.
 import { db } from "./db";
 import { newId } from "./repo";
+import { MAX_UPLOAD_PDF_BYTES } from "./pdfLimits";
 import { imageIds } from "./richText";
 import type { StoredImage } from "./types";
 
@@ -101,6 +102,8 @@ export function imageUrl(id: string): Promise<string | null> {
 export async function uploadPendingImages(): Promise<void> {
   const pending = await db.images.where("uploaded").equals(0).toArray();
   for (const image of pending) {
+    // A PDF the account cannot take stays on this device.
+    if (image.type === "application/pdf" && image.data.byteLength > MAX_UPLOAD_PDF_BYTES) continue;
     const response = await fetch(`/api/images/${image.id}`, {
       method: "PUT",
       headers: { "Content-Type": image.type },

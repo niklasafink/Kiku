@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
-import { ArrowLeft, ArrowRight, Check, CloudOff, Eye, EyeOff, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Check, ClipboardCheck, ClipboardList, CloudOff, Eye, EyeOff, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, Upload, X } from "lucide-react";
 import { useAccount } from "@/components/Account";
 import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
 import { Handwriting } from "@/components/Handwriting";
+import { NormReport } from "@/components/NormReport";
+import { PdfViewer } from "@/components/PdfViewer";
 import { Recorder } from "@/components/Recorder";
 import { RichText } from "@/components/RichText";
+import { DocWorkspace, SideView } from "@/components/StudyPanes";
 import { ScoreBadge, Trend, scoreTone } from "@/components/score";
 import { LiveStar } from "@/components/Tags";
 import { inDays } from "@/lib/format";
@@ -15,7 +18,10 @@ import { hasInk, recognizeInk } from "@/lib/ink";
 import { canSpeak, speak, stopSpeaking } from "@/lib/speak";
 import { isOffline } from "@/lib/pendingGrades";
 import { addAttempt, attemptsForCard, clearSession, latestAttempt, queuePendingAnswer, saveSession } from "@/lib/repo";
-import { toPlainText } from "@/lib/richText";
+import { MaterialError, readMaterial } from "@/lib/material";
+import { markNorms } from "@/lib/norms";
+import { isPdf } from "@/lib/pdfFiles";
+import { pdfRefs, toPlainText } from "@/lib/richText";
 import { useFolders } from "@/lib/hooks";
 import { pathTo } from "@/lib/tree";
 import { daysUntil, scheduleOf } from "@/lib/srs";
@@ -30,18 +36,19 @@ const EMPTY: CardState = { answer: "", usedVoice: false, revealed: false, attemp
 const RADIAL = { success: "text-success", warning: "text-warning", error: "text-error" } as const;
 const LABEL = "text-xs font-extrabold tracking-wide uppercase opacity-60";
 /** How the answer is given: spoken, typed or written by hand. The choice is remembered on the device. */
-type AnswerMode = "speak" | "type" | "pen";
+type AnswerMode = "speak" | "type" | "pen" | "file";
 const MODES = [
   { mode: "speak", label: "Sprechen", Icon: Mic },
   { mode: "type", label: "Tippen", Icon: Keyboard },
   { mode: "pen", label: "Handschrift", Icon: PenLine },
+  { mode: "file", label: "PDF oder Foto hochladen", Icon: Upload },
 ] as const;
 const MODE_KEY = "kiku-answer-mode";
 
 function storedMode(): AnswerMode {
   try {
     const stored = localStorage.getItem(MODE_KEY);
-    return stored === "pen" || stored === "type" ? stored : "speak";
+    return stored === "pen" || stored === "type" || stored === "file" ? stored : "speak";
   } catch {
     return "speak";
   }
@@ -119,6 +126,9 @@ export function StudySession({
   const [handsFree, setHandsFree] = useState(false);
   const [listen, setListen] = useState(0);
   const [mode, setMode] = useState<AnswerMode>(storedMode);
+  // A PDF or photo of a handwritten solution, shown next to its text; only kept while the session is open.
+  const [answerFiles, setAnswerFiles] = useState<Record<string, File>>({});
+  const [reading, setReading] = useState<{ cardId: string; label: string } | null>(null);
   // Gradings left in the month, as the server reported it with the last answer.
   const [remaining, setRemaining] = useState<{ remaining: number; limit: number } | null>(null);
   const account = useAccount();
@@ -240,13 +250,15 @@ export function StudySession({
     }
 
     const previous = await latestAttempt(target.id);
+    // Norms of the solution that the answer does not name are marked on top of what the AI found.
+    const marked = markNorms(data.segments as Segment[], answer);
     const attempt = await addAttempt({
       cardId: target.id,
       inputMode,
       answerText: answer.trim(),
       solutionSnapshot: target.solution,
-      segments: data.segments as Segment[],
-      score: data.score as number,
+      segments: marked.segments,
+      score: marked.score,
     });
     const nextDue = scheduleOf(await attemptsForCard(target.id))?.due;
     patch(target.id, { attempt, previousScore: previous?.score ?? null, revealed: false, nextDue });
@@ -317,6 +329,29 @@ export function StudySession({
       setError(e instanceof Error && e.message ? e.message : "Die Erklärung ist fehlgeschlagen.");
     } finally {
       setExplainingId(null);
+    }
+  }
+
+  /** Reads the text of an uploaded PDF or photo into the answer. The file stays visible beside it. */
+  async function readAnswerFile(target: Card, file: File) {
+    setError(null);
+    setReading({ cardId: target.id, label: "Datei wird gelesen …" });
+    try {
+      const pages = await readMaterial(
+        file,
+        (done, total) => setReading({ cardId: target.id, label: `Seite ${done} von ${total} wird gelesen …` }),
+        { kind: "handwriting", minChars: 1 },
+      );
+      const text = pages.join("\n\n").trim();
+      setStates((all) => {
+        const current = all[target.id] ?? EMPTY;
+        return { ...all, [target.id]: { ...current, answer: [current.answer.trim(), text].filter(Boolean).join("\n\n"), usedPen: true } };
+      });
+      setAnswerFiles((files) => ({ ...files, [target.id]: file }));
+    } catch (e) {
+      setError(e instanceof MaterialError || e instanceof Error ? e.message : "Die Datei konnte nicht gelesen werden.");
+    } finally {
+      setReading(null);
     }
   }
 
@@ -541,141 +576,360 @@ export function StudySession({
   const answered = cards.filter((c) => (handedIn ? states[c.id]?.attempt : isAnswered(c))).length;
   const { attempt } = state;
   const strokes = state.ink ?? [];
+  const inputShown = !attempt && !state.revealed && !state.pending;
+  const answering = handedIn && inputShown;
+  // A card with PDFs gets the reader: task and solution left, answer and solution right, each side with tabs.
+  const docMode = pdfRefs(card.question).length > 0 || pdfRefs(card.solution).length > 0;
   // Writing by hand needs room: the answer side gets two thirds of the width.
-  const writing = mode === "pen" && !attempt && !state.revealed && !state.pending;
-  const answering = handedIn && !attempt && !state.revealed && !state.pending;
+  const writing = mode === "pen" && inputShown && !docMode;
   const column = peeking ? "md:min-h-0 md:overflow-y-auto md:overscroll-contain md:pb-1" : "";
+  const readingThis = reading?.cardId === card.id ? reading : null;
 
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Link href={backHref} className="btn btn-ghost btn-sm mr-auto sm:mr-0" title="Lernen abbrechen und zurück">
-          <X className="size-4" /> Abbrechen
-        </Link>
-        {/* On phones the bar gets its own row; between the buttons it would shrink to a sliver. */}
-        <progress
-          className="progress progress-primary order-last h-1.5 basis-full sm:order-none sm:min-w-12 sm:basis-0 sm:flex-1"
-          value={answered}
-          max={cards.length}
-          aria-label="Fortschritt"
-        />
-        <div className="join">
-          <button
-            className="btn join-item btn-sm bg-base-100"
-            onClick={() => go(index - 1)}
-            disabled={index === 0 || grading}
-            aria-label="Vorherige Karte"
-          >
-            <ArrowLeft className="size-4" />
-          </button>
-          <span className="btn join-item btn-sm pointer-events-none bg-base-100 font-extrabold tabular-nums">
-            {index + 1} / {cards.length}
-          </span>
-          <button
-            className="btn join-item btn-sm bg-base-100"
-            onClick={() => go(index + 1)}
-            disabled={grading}
-            aria-label={index + 1 < cards.length ? "Nächste Karte" : "Zur Zusammenfassung"}
-          >
-            <ArrowRight className="size-4" />
-          </button>
-        </div>
-        {handedIn && canSpeak() && (
-          <button
-            className={`btn btn-sm ${handsFree ? "btn-primary" : "btn-ghost"}`}
-            aria-pressed={handsFree}
-            onClick={() => {
-              // Both need a tap to be allowed on phones and tablets; this one unlocks them for the session.
-              if (!handsFree) chooseMode("speak");
-              else stopSpeaking();
-              setHandsFree(!handsFree);
-            }}
-            disabled={grading}
-            title="Frage wird vorgelesen, du antwortest laut, das Ergebnis wird angesagt"
-          >
-            <Headphones className="size-4" />
-            <span className="hidden sm:inline">Freihand</span>
-          </button>
-        )}
-        {cards.length > 1 && (
-          <button
-            className="btn btn-ghost btn-square btn-sm"
-            onClick={() => {
-              setCards(shuffled(cards));
-              setIndex(0);
-            }}
-            disabled={grading}
-            aria-label="Karten mischen"
-            title="Karten mischen"
-          >
-            <Shuffle className="size-4" />
-          </button>
-        )}
-        {/* The actions; on phones they get a row of their own with the main one stretched. */}
-        <div className="flex basis-full items-center gap-2 sm:basis-auto">
-          {!handedIn ? (
-            <button className="btn btn-primary btn-sm flex-1 sm:flex-none" onClick={() => go(index + 1)} title="⌘/Strg + Enter">
-              {index + 1 < cards.length ? "Weiter" : "Zur Abgabe"} <ArrowRight className="size-4" />
-            </button>
-          ) : !answering ? (
-            <>
-              {!state.pending && (
-                <button className="btn btn-sm bg-base-100" onClick={() => patch(card.id, { ...EMPTY, usedPen: false, ink: [] })}>
-                  <RotateCcw className="size-4" /> {attempt ? "Nochmal" : "Doch antworten"}
-                </button>
-              )}
-              <button className="btn btn-primary btn-sm flex-1 sm:flex-none" onClick={() => go(index + 1)}>
-                {index + 1 < cards.length ? "Weiter" : "Abschließen"} <ArrowRight className="size-4" />
+  const iconButton = "btn btn-sm btn-square shrink-0";
+
+  // One row from tablets up; on phones the bar wraps, so the main button is never pushed out of the screen.
+  const bar = (
+    <div className="flex flex-wrap items-center gap-1.5 py-0.5 sm:flex-nowrap sm:overflow-x-auto sm:[scrollbar-width:none]">
+      <Link href={backHref} className={`${iconButton} btn-ghost`} title="Lernen abbrechen und zurück" aria-label="Lernen abbrechen">
+        <X className="size-4" />
+      </Link>
+      <progress className="progress progress-primary order-last mx-1 h-1.5 basis-full sm:order-none sm:min-w-10 sm:flex-1 sm:basis-0" value={answered} max={cards.length} aria-label="Fortschritt" />
+      <div className="join shrink-0">
+        <button className="btn join-item btn-sm btn-square bg-base-100" onClick={() => go(index - 1)} disabled={index === 0 || grading} aria-label="Vorherige Karte" title="Vorherige Karte (←)">
+          <ArrowLeft className="size-4" />
+        </button>
+        <span className="btn join-item btn-sm pointer-events-none bg-base-100 px-2 font-extrabold tabular-nums">
+          {index + 1}/{cards.length}
+        </span>
+        <button
+          className="btn join-item btn-sm btn-square bg-base-100"
+          onClick={() => go(index + 1)}
+          disabled={grading}
+          aria-label={index + 1 < cards.length ? "Nächste Karte" : "Zur Zusammenfassung"}
+          title={index + 1 < cards.length ? "Nächste Karte (→)" : "Zur Zusammenfassung"}
+        >
+          <ArrowRight className="size-4" />
+        </button>
+      </div>
+      {docMode && handedIn && (
+        <>
+          <LiveStar cardId={card.id} />
+          <Link href={`/c/${card.id}`} className={`${iconButton} btn-ghost`} title="Karte ansehen und bearbeiten" aria-label="Karte bearbeiten">
+            <Pencil className="size-4" />
+          </Link>
+        </>
+      )}
+      {handedIn && canSpeak() && (
+        <button
+          className={`${iconButton} ${handsFree ? "btn-primary" : "btn-ghost"}`}
+          aria-pressed={handsFree}
+          aria-label="Freihand"
+          onClick={() => {
+            // Both need a tap to be allowed on phones and tablets; this one unlocks them for the session.
+            if (!handsFree) chooseMode("speak");
+            else stopSpeaking();
+            setHandsFree(!handsFree);
+          }}
+          disabled={grading}
+          title="Freihand: Frage wird vorgelesen, du antwortest laut, das Ergebnis wird angesagt"
+        >
+          <Headphones className="size-4" />
+        </button>
+      )}
+      {cards.length > 1 && (
+        <button
+          className={`${iconButton} btn-ghost`}
+          onClick={() => {
+            setCards(shuffled(cards));
+            setIndex(0);
+          }}
+          disabled={grading}
+          aria-label="Karten mischen"
+          title="Karten mischen"
+        >
+          <Shuffle className="size-4" />
+        </button>
+      )}
+
+      {inputShown && (
+        <>
+          <span className="mx-0.5 h-5 w-px shrink-0 bg-base-300" aria-hidden />
+          <div className="join shrink-0" role="group" aria-label="Art der Antwort">
+            {MODES.map(({ mode: option, label, Icon }) => (
+              <button
+                key={option}
+                className={`btn btn-sm btn-square join-item ${mode === option ? "btn-primary" : "bg-base-100"}`}
+                aria-pressed={mode === option}
+                aria-label={label}
+                title={label}
+                onClick={() => chooseMode(option)}
+                disabled={grading}
+              >
+                <Icon className="size-4" />
               </button>
-            </>
+            ))}
+          </div>
+        </>
+      )}
+
+      <span className="mx-0.5 h-5 w-px shrink-0 bg-base-300" aria-hidden />
+      {!handedIn ? (
+        <button className="btn btn-primary btn-sm shrink-0" onClick={() => go(index + 1)} title="⌘/Strg + Enter">
+          {index + 1 < cards.length ? "Weiter" : "Zur Abgabe"} <ArrowRight className="size-4" />
+        </button>
+      ) : !answering ? (
+        <>
+          {!state.pending && (
+            <button
+              className={`btn btn-sm shrink-0 bg-base-100 ${attempt ? "" : "btn-square"}`}
+              onClick={() => patch(card.id, { ...EMPTY, usedPen: false, ink: [] })}
+              title={attempt ? "Die Karte noch einmal beantworten" : "Doch antworten"}
+              aria-label={attempt ? "Nochmal" : "Doch antworten"}
+            >
+              <RotateCcw className="size-4" /> {attempt && <span className="hidden sm:inline">Nochmal</span>}
+            </button>
+          )}
+          <button className="btn btn-primary btn-sm shrink-0" onClick={() => go(index + 1)}>
+            {index + 1 < cards.length ? "Weiter" : "Abschließen"} <ArrowRight className="size-4" />
+          </button>
+        </>
+      ) : (
+        <>
+          {grading ? (
+            <button className="btn btn-ghost btn-sm shrink-0" onClick={cancelGrading}>
+              <X className="size-4" /> Abbrechen
+            </button>
           ) : (
             <>
-              {grading ? (
-                <button className="btn btn-ghost btn-sm" onClick={cancelGrading}>
-                  <X className="size-4" /> Abbrechen
+              {!docMode && (
+                <button
+                  className={`${iconButton} ${peeking ? "btn-active" : "btn-ghost"}`}
+                  aria-pressed={peeking}
+                  aria-label="Spicken"
+                  onClick={() => setPeekId(peeking ? null : card.id)}
+                  title="Spicken: Lösung unter der Frage einblenden und trotzdem antworten"
+                >
+                  {peeking ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
-              ) : (
-                <>
-                  <button
-                    className={`btn btn-sm ${peeking ? "btn-active" : "btn-ghost"}`}
-                    aria-pressed={peeking}
-                    onClick={() => setPeekId(peeking ? null : card.id)}
-                    title="Lösung unter der Frage einblenden und trotzdem antworten"
-                  >
-                    {peeking ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                    Spicken
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => patch(card.id, { revealed: true })}
-                    title="Lösung ansehen, ohne zu antworten"
-                  >
-                    <span className="hidden sm:inline">Lösung zeigen</span>
-                    <span className="sm:hidden">Lösung</span>
-                  </button>
-                </>
               )}
               <button
-                className="btn btn-primary btn-sm flex-1 sm:flex-none"
-                onClick={() => void grade(card)}
-                disabled={grading || !isAnswered(card)}
-                title="⌘/Strg + Enter"
+                className={`${iconButton} btn-ghost`}
+                aria-label="Lösung zeigen"
+                onClick={() => patch(card.id, { revealed: true })}
+                title="Lösung ansehen, ohne zu antworten"
               >
-                {grading ? (
-                  <>
-                    <span className="loading loading-spinner loading-xs" />{" "}
-                    {hasInk(strokes) ? "KI liest deine Handschrift …" : "KI gleicht ab …"}
-                  </>
-                ) : (
-                  <>
-                    <Check className="size-4" /> Fertig
-                  </>
-                )}
+                <BookOpen className="size-4" />
               </button>
             </>
           )}
-        </div>
+          <button
+            className="btn btn-primary btn-sm shrink-0"
+            onClick={() => void grade(card)}
+            disabled={grading || !isAnswered(card)}
+            title="Antwort abgeben und abgleichen (⌘/Strg + Enter)"
+          >
+            {grading ? (
+              <>
+                <span className="loading loading-spinner loading-xs" /> {hasInk(strokes) || readingThis ? "KI liest …" : "KI gleicht ab …"}
+              </>
+            ) : (
+              <>
+                <Check className="size-4" /> Fertig
+              </>
+            )}
+          </button>
+        </>
+      )}
+    </div>
+  );
+
+  const scoreBlock = attempt && (
+    <section className="tile pop-in flex items-center gap-4 p-4">
+      <div
+        className={`radial-progress shrink-0 font-black ${RADIAL[scoreTone(attempt.score)]}`}
+        style={{ "--value": attempt.score, "--size": "4.5rem", "--thickness": "0.5rem" } as React.CSSProperties}
+        role="img"
+        aria-label={`${attempt.score} Prozent`}
+      >
+        <span className="text-base-content tabular-nums">{attempt.score} %</span>
       </div>
+      <div>
+        <p className="text-lg font-extrabold">{praise(attempt.score)}</p>
+        {state.previousScore === null ? (
+          <p className="text-sm opacity-70">Erster Versuch für diese Karte.</p>
+        ) : (
+          <p className="flex flex-wrap items-center gap-2 text-sm opacity-90">
+            Letztes Mal: {state.previousScore} %
+            <Trend delta={attempt.score - state.previousScore} />
+          </p>
+        )}
+        {state.nextDue !== undefined && <p className="text-sm opacity-70">Nächste Wiederholung {inDays(daysUntil(state.nextDue, attempt.createdAt))}.</p>}
+        {remaining && remaining.remaining < SHOW_REMAINING_BELOW && (
+          <p className="text-sm font-semibold text-warning">
+            Noch {remaining.remaining} von {remaining.limit} KI-Auswertungen in diesem Monat.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+
+  const yourAnswerBlock = attempt && (
+    <section className="tile p-4">
+      <h2 className={LABEL}>Deine Antwort</h2>
+      <p className="mt-1.5 whitespace-pre-wrap">{attempt.answerText}</p>
+    </section>
+  );
+
+  const explainBlock =
+    attempt &&
+    (state.explanation ? (
+      <section className="tile pop-in p-4">
+        <h2 className={`mb-1.5 flex items-center gap-1.5 ${LABEL}`}>
+          <Lightbulb className="size-3.5" aria-hidden /> Erklärung
+        </h2>
+        <RichText text={state.explanation} className="text-sm leading-relaxed" />
+      </section>
+    ) : (
+      attempt.score < 100 && (
+        <button className="btn btn-sm self-start bg-base-100" onClick={() => void explain(card)} disabled={explainingId !== null}>
+          {explainingId === card.id ? <span className="loading loading-spinner loading-xs" /> : <Lightbulb className="size-4" />}
+          Was hat gefehlt, und wie merke ich es mir?
+        </button>
+      )
+    ));
+
+  const gradedBlock = attempt && (
+    <>
+      <section className="tile pop-in p-4">
+        <h2 className={`mb-1.5 ${LABEL}`}>Lösung</h2>
+        <GradedSolution segments={attempt.segments} solution={attempt.solutionSnapshot} />
+      </section>
+      <GradeLegend segments={attempt.segments} />
+      <NormReport segments={attempt.segments} answer={attempt.answerText} />
+    </>
+  );
+
+  const pendingBlock = (
+    <section className="tile pop-in flex flex-col gap-3 p-4">
+      <h2 className={`flex items-center gap-1.5 ${LABEL}`}>
+        <CloudOff className="size-3.5" aria-hidden /> Antwort gespeichert
+      </h2>
+      <p>Du warst offline. Die Antwort wird ausgewertet, sobald das Gerät wieder eine Verbindung hat; das Ergebnis findest du dann im Verlauf der Karte.</p>
+      {state.answer && <p className="whitespace-pre-wrap text-sm opacity-80">{state.answer}</p>}
+    </section>
+  );
+
+  const revealedBlock = (
+    <section className="tile pop-in p-4">
+      <h2 className={`mb-1.5 ${LABEL}`}>Lösung</h2>
+      <RichText text={card.solution} className="leading-relaxed" />
+      <p className="mt-3 text-sm opacity-60">Nur angesehen, nicht gewertet.</p>
+    </section>
+  );
+
+  const errorBlock = error && (
+    <p role="alert" className="alert alert-error alert-soft">
+      {error}
+    </p>
+  );
+
+  const inputBlock = (
+    <section className="flex flex-col gap-3">
+      {mode === "pen" ? (
+        <>
+          <Handwriting strokes={strokes} onChange={(next) => patch(card.id, { ink: next })} disabled={grading} />
+          <p className="text-sm opacity-70">
+            {handedIn ? "Mit „Fertig“ liest die KI deine Handschrift und gleicht sie mit der Lösung ab." : "Bei der Abgabe liest die KI deine Handschrift."}
+          </p>
+        </>
+      ) : mode === "speak" ? (
+        <>
+          <Recorder
+            browser={browserDictation}
+            disabled={grading}
+            autoStart={handsFree ? listen : 0}
+            stopAfterSilence={handsFree ? 3500 : undefined}
+            onTranscript={(text) => {
+              const current = states[card.id] ?? EMPTY;
+              const answer = current.answer.trim() ? `${current.answer.trim()} ${text}` : text;
+              patch(card.id, { answer, usedVoice: true });
+              // Hands-free there is nobody to press "Fertig".
+              if (handsFree && handedIn) void grade(card, answer);
+            }}
+          />
+          {handsFree && (
+            <p className="text-center text-sm opacity-70">
+              Freihand: Sprich nach der Frage deine Antwort. Nach einer Pause von ein paar Sekunden wird sie ausgewertet; mit dem roten Knopf geht es sofort weiter.
+            </p>
+          )}
+        </>
+      ) : mode === "file" ? (
+        <AnswerFile
+          file={answerFiles[card.id]}
+          busy={readingThis?.label ?? null}
+          disabled={grading}
+          onPick={(picked) => void readAnswerFile(card, picked)}
+        />
+      ) : null}
+      {/* Also shown otherwise once there is text to correct: what was spoken, read from a file, or read from handwriting before a failed grading. */}
+      {(mode === "type" || state.answer) && (
+        <PaperSheet
+          value={state.answer}
+          onChange={(answer) => patch(card.id, { answer })}
+          disabled={grading}
+          compact={mode !== "type"}
+          onSubmit={() => (handedIn ? void grade(card) : go(index + 1))}
+        />
+      )}
+    </section>
+  );
+
+  if (docMode) {
+    const result = attempt ? (
+      <>
+        {scoreBlock}
+        {gradedBlock}
+        {yourAnswerBlock}
+        {explainBlock}
+      </>
+    ) : state.pending ? (
+      pendingBlock
+    ) : state.revealed ? (
+      revealedBlock
+    ) : (
+      inputBlock
+    );
+    return (
+      <div className="flex flex-col gap-2">
+        {bar}
+        <DocWorkspace
+          resultKey={`${card.id}:${attempt?.id ?? ""}`}
+          left={[
+            { id: "task", label: "Aufgabe", Icon: ClipboardList, node: <SideView text={card.question} /> },
+            { id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView text={card.solution} /> },
+          ]}
+          right={[
+            {
+              id: "answer",
+              label: attempt ? "Ergebnis" : "Antwort",
+              Icon: attempt ? ClipboardCheck : PenLine,
+              node: (
+                <>
+                  {result}
+                  {errorBlock}
+                </>
+              ),
+            },
+            { id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView text={card.solution} /> },
+          ]}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {bar}
 
       <div
         key={card.id}
@@ -707,172 +961,141 @@ export function StudySession({
             </section>
           )}
 
-          {attempt && (
-            <>
-              <section className="tile pop-in flex items-center gap-4 p-4">
-                <div
-                  className={`radial-progress shrink-0 font-black ${RADIAL[scoreTone(attempt.score)]}`}
-                  style={{ "--value": attempt.score, "--size": "4.5rem", "--thickness": "0.5rem" } as React.CSSProperties}
-                  role="img"
-                  aria-label={`${attempt.score} Prozent`}
-                >
-                  <span className="text-base-content tabular-nums">{attempt.score} %</span>
-                </div>
-                <div>
-                  <p className="text-lg font-extrabold">{praise(attempt.score)}</p>
-                  {state.previousScore === null ? (
-                    <p className="text-sm opacity-70">Erster Versuch für diese Karte.</p>
-                  ) : (
-                    <p className="flex flex-wrap items-center gap-2 text-sm opacity-90">
-                      Letztes Mal: {state.previousScore} %
-                      <Trend delta={attempt.score - state.previousScore} />
-                    </p>
-                  )}
-                  {state.nextDue !== undefined && (
-                    <p className="text-sm opacity-70">Nächste Wiederholung {inDays(daysUntil(state.nextDue, attempt.createdAt))}.</p>
-                  )}
-                  {remaining && remaining.remaining < SHOW_REMAINING_BELOW && (
-                    <p className="text-sm font-semibold text-warning">
-                      Noch {remaining.remaining} von {remaining.limit} KI-Auswertungen in diesem Monat.
-                    </p>
-                  )}
-                </div>
-              </section>
-              <section className="tile p-4">
-                <h2 className={LABEL}>Deine Antwort</h2>
-                <p className="mt-1.5 whitespace-pre-wrap">{attempt.answerText}</p>
-              </section>
-              {state.explanation ? (
-                <section className="tile pop-in p-4">
-                  <h2 className={`mb-1.5 flex items-center gap-1.5 ${LABEL}`}>
-                    <Lightbulb className="size-3.5" aria-hidden /> Erklärung
-                  </h2>
-                  <RichText text={state.explanation} className="text-sm leading-relaxed" />
-                </section>
-              ) : (
-                attempt.score < 100 && (
-                  <button
-                    className="btn btn-sm self-start bg-base-100"
-                    onClick={() => void explain(card)}
-                    disabled={explainingId !== null}
-                  >
-                    {explainingId === card.id ? <span className="loading loading-spinner loading-xs" /> : <Lightbulb className="size-4" />}
-                    Was hat gefehlt, und wie merke ich es mir?
-                  </button>
-                )
-              )}
-            </>
-          )}
+          {scoreBlock}
+          {yourAnswerBlock}
+          {explainBlock}
         </div>
 
         {/* Right: answer input first, then the solution. */}
         <div className={`flex flex-col gap-3 ${column}`}>
-          {attempt ? (
-            <>
-            <section className="tile pop-in p-4">
-              <h2 className={`mb-1.5 ${LABEL}`}>Lösung</h2>
-              <GradedSolution segments={attempt.segments} solution={attempt.solutionSnapshot} />
-            </section>
-            <GradeLegend segments={attempt.segments} />
-            </>
-          ) : state.pending ? (
-            <section className="tile pop-in flex flex-col gap-3 p-4">
-              <h2 className={`flex items-center gap-1.5 ${LABEL}`}>
-                <CloudOff className="size-3.5" aria-hidden /> Antwort gespeichert
-              </h2>
-              <p>
-                Du warst offline. Die Antwort wird ausgewertet, sobald das Gerät wieder eine Verbindung hat; das Ergebnis
-                findest du dann im Verlauf der Karte.
-              </p>
-              {state.answer && <p className="whitespace-pre-wrap text-sm opacity-80">{state.answer}</p>}
-            </section>
-          ) : state.revealed ? (
-            <section className="tile pop-in p-4">
-              <h2 className={`mb-1.5 ${LABEL}`}>Lösung</h2>
-              <RichText text={card.solution} className="leading-relaxed" />
-              <p className="mt-3 text-sm opacity-60">Nur angesehen, nicht gewertet.</p>
-            </section>
-          ) : (
-            <section className="tile flex flex-col gap-3 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className={LABEL}>Deine Antwort</h2>
-                <div className="join" role="group" aria-label="Art der Antwort">
-                  {MODES.map(({ mode: option, label, Icon }) => (
-                    <button
-                      key={option}
-                      className={`btn btn-sm join-item ${mode === option ? "btn-primary" : "bg-base-100"}`}
-                      aria-pressed={mode === option}
-                      onClick={() => chooseMode(option)}
-                      disabled={grading}
-                    >
-                      <Icon className="size-4" /> {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {mode === "pen" ? (
-                <>
-                  <Handwriting strokes={strokes} onChange={(next) => patch(card.id, { ink: next })} disabled={grading} />
-                  <p className="text-sm opacity-70">
-                    {handedIn
-                      ? "Mit „Fertig“ liest die KI deine Handschrift und gleicht sie mit der Lösung ab."
-                      : "Bei der Abgabe liest die KI deine Handschrift."}
-                  </p>
-                </>
-              ) : mode === "speak" ? (
-                <>
-                  <Recorder
-                    browser={browserDictation}
-                    disabled={grading}
-                    autoStart={handsFree ? listen : 0}
-                    stopAfterSilence={handsFree ? 3500 : undefined}
-                    onTranscript={(text) => {
-                      const current = states[card.id] ?? EMPTY;
-                      const answer = current.answer.trim() ? `${current.answer.trim()} ${text}` : text;
-                      patch(card.id, { answer, usedVoice: true });
-                      // Hands-free there is nobody to press "Fertig".
-                      if (handsFree && handedIn) void grade(card, answer);
-                    }}
-                  />
-                  {handsFree && (
-                    <p className="text-center text-sm opacity-70">
-                      Freihand: Sprich nach der Frage deine Antwort. Nach einer Pause von ein paar Sekunden wird sie
-                      ausgewertet; mit dem roten Knopf geht es sofort weiter.
-                    </p>
-                  )}
-                </>
-              ) : null}
-              {/* Also shown otherwise once there is text to correct: what was spoken, or handwriting that was read before a failed grading. */}
-              {(mode === "type" || state.answer) && (
-                <label>
-                  <span className="sr-only">Deine Antwort</span>
-                  <GrowingTextarea
-                    className="textarea min-h-52 w-full"
-                    value={state.answer}
-                    onChange={(e) => patch(card.id, { answer: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        if (handedIn) void grade(card);
-                        else go(index + 1);
-                      }
-                    }}
-                    placeholder="Deine Antwort …"
-                    disabled={grading}
-                  />
-                </label>
-              )}
-            </section>
-          )}
-
-          {error && (
-            <p role="alert" className="alert alert-error alert-soft">
-              {error}
-            </p>
-          )}
-
+          {attempt ? gradedBlock : state.pending ? pendingBlock : state.revealed ? revealedBlock : inputBlock}
+          {errorBlock}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The answer as a sheet of paper on a desk, like a page in a word processor. */
+function PaperSheet({
+  value,
+  onChange,
+  disabled,
+  compact,
+  onSubmit,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  /** Little room: the text is only there to be corrected. */
+  compact?: boolean;
+  onSubmit: () => void;
+}) {
+  const words = value.trim() ? value.trim().split(/\s+/).length : 0;
+  return (
+    <div className="rounded-field bg-base-200 p-2.5 sm:p-4">
+      <div className="mx-auto w-full max-w-3xl rounded-[3px] bg-base-100 shadow-[0_1px_3px_rgb(0_0_0/0.16),0_10px_28px_rgb(0_0_0/0.07)] ring-1 ring-base-content/5">
+        <label>
+          <span className="sr-only">Deine Antwort</span>
+          <GrowingTextarea
+            className={`block w-full bg-transparent px-6 py-8 font-serif text-[1.0625rem] leading-[1.8] outline-none placeholder:italic placeholder:opacity-40 sm:px-12 sm:py-12 ${
+              compact ? "min-h-40" : "min-h-[26rem]"
+            }`}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                onSubmit();
+              }
+            }}
+            placeholder="Schreib deine Lösung hier …"
+            disabled={disabled}
+            spellCheck
+            lang="de"
+          />
+        </label>
+      </div>
+      <p className="mt-2 text-center text-xs tabular-nums opacity-60" aria-live="off">
+        {words} {words === 1 ? "Wort" : "Wörter"} · {value.length} Zeichen
+      </p>
+    </div>
+  );
+}
+
+/** Picks a PDF or a photo of a handwritten solution and shows it; its text is read by the study session. */
+function AnswerFile({
+  file,
+  busy,
+  disabled,
+  onPick,
+}: {
+  file?: File;
+  busy: string | null;
+  disabled?: boolean;
+  onPick: (file: File) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const [photo, setPhoto] = useState<string | null>(null);
+  const isPhoto = Boolean(file && !isPdf(file));
+  useEffect(() => {
+    if (!file || isPdf(file)) return;
+    const url = URL.createObjectURL(file);
+    const frame = requestAnimationFrame(() => setPhoto(url));
+    return () => {
+      cancelAnimationFrame(frame);
+      URL.revokeObjectURL(url);
+      setPhoto(null);
+    };
+  }, [file]);
+
+  const pick = (list: FileList | null) => {
+    const picked = list?.[0];
+    if (picked) onPick(picked);
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <input
+        ref={input}
+        type="file"
+        accept="application/pdf,.pdf,image/*"
+        className="hidden"
+        onChange={(e) => {
+          pick(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      {file && !isPhoto && <PdfViewer source={{ file }} name={file.name} className="h-[30rem]" />}
+      {file && isPhoto && photo && (
+        <div className="max-h-[30rem] overflow-auto rounded-field border-2 border-base-300 bg-base-200 p-2">
+          {/* The user's own photo, an object URL; nothing for next/image to optimise. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={photo} alt="Hochgeladene Lösung" className="mx-auto max-w-full" />
+        </div>
+      )}
+      <button
+        type="button"
+        className={`flex flex-col items-center gap-1.5 rounded-field border-2 border-dashed px-4 py-5 text-center transition-colors ${
+          over ? "border-primary bg-primary/5" : "border-base-300 hover:border-primary/60"
+        }`}
+        onClick={() => input.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          pick(e.dataTransfer.files);
+        }}
+        disabled={disabled || busy !== null}
+      >
+        {busy ? <span className="loading loading-spinner loading-sm" /> : <Upload className="size-5 opacity-70" aria-hidden />}
+        <span className="font-bold">{busy ?? (file ? "Andere Datei hochladen" : "PDF oder Foto der handgeschriebenen Lösung hochladen")}</span>
+        {!busy && <span className="text-sm opacity-70">Die KI liest den Text und gleicht ihn mit der Musterlösung ab, auch Paragraphen. Ablegen geht auch.</span>}
+      </button>
     </div>
   );
 }
