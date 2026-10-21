@@ -1,0 +1,26 @@
+# Kiku
+
+> Kiku ist eine Karteikarten-App für Active Recall im Browser. Zu jeder Karte hinterlegt man die eigene Lösung, antwortet gesprochen, getippt oder handschriftlich, und eine KI markiert Satz für Satz, welche Teile der Lösung genannt wurden (grün), fehlen (grau) oder unsicher bzw. widersprüchlich sind (rot). Die Oberfläche ist deutsch. Betreiber ist die Dealzforest UG (haftungsbeschränkt), Frankfurt am Main.
+
+## Seiten
+
+- [Startseite](https://kikucards.de/): Was Kiku macht, Live-Demo ohne Konto, häufige Fragen
+- [Preise](https://kikucards.de/pricing): Kostenlos, Pro (4,99 € im Monat oder 29 € im Jahr), Einmalkauf (49 €), Vergleich der Tarife und häufige Fragen
+
+## Funktionen
+
+- Ordner mit beliebig tiefen Unterordnern, Karten mit Frage und Lösung, Formatierung, Tabellen, Formeln (LaTeX) und Bilder
+- Bildverdeckung (Image Occlusion) und Lückentext-Karten
+- Import aus Anki (.apkg, .colpkg), Excel, CSV und Text; Export als CSV, Anki-Paket und Text
+- KI erstellt Karten aus Vorlesungsfolien, Skripten (PDF, PowerPoint, Word) und Fotos von Notizen
+- Spaced Repetition mit FSRS, Prüfungstermine je Ordner, Statistik und Verlauf je Karte
+- Antworten per Sprache, Tastatur oder Handschrift (Apple Pencil), freihändiges Lernen mit Vorlesen
+- Lerntandem: Gespräch mit einer KI über die Karten eines Ordners
+- Karten per MCP aus Claude anlegen
+- Ordner per Link teilen, offline nutzbar, auf iPad, Handy, Mac und Windows im Browser
+
+## Rechtliches
+
+- [Impressum](https://kikucards.de/impressum)
+- [Datenschutz](https://kikucards.de/datenschutz)
+- [AGB](https://kikucards.de/agb)

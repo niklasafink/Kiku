@@ -5,7 +5,7 @@
  */
 export function KikuWordmark({ className = "" }: { className?: string }) {
   return (
-    <span className={`kiku-wordmark ${className}`} aria-label="kiku">
+    <span className={`kiku-wordmark ${className}`} role="img" aria-label="kiku">
       <span aria-hidden>
         <span className="kiku-k">k</span>i<span className="kiku-k">k</span>u
       </span>

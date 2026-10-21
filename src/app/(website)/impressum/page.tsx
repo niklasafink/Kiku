@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { WRAP } from "../_components/shared";
 import { WebsiteFrame } from "../_components/WebsiteFrame";
+import { NOINDEX } from "../_lib/seo";
 import { SERVER_MODE } from "@/server/auth";
 
 export const metadata: Metadata = {
   title: "Impressum | Kiku",
   description: "Anbieterkennzeichnung der Dealzforest UG (haftungsbeschränkt).",
+  robots: NOINDEX,
 };
 
 const SECTION_HEADING = "text-xs font-extrabold tracking-wide uppercase opacity-60";
@@ -18,7 +20,7 @@ export default function ImprintPage() {
   return (
     <WebsiteFrame>
       <div className="flex-1 bg-base-200">
-      <main className={`${WRAP} flex-1 py-12 lg:py-16`}>
+      <div className={`${WRAP} flex-1 py-12 lg:py-16`}>
         <div className="mx-auto max-w-3xl">
           <h1 className="text-4xl font-black">Impressum</h1>
           <div className="tile mt-8 flex flex-col gap-6 p-6">
@@ -70,7 +72,7 @@ export default function ImprintPage() {
             </section>
           </div>
         </div>
-      </main>
+      </div>
       </div>
     </WebsiteFrame>
   );

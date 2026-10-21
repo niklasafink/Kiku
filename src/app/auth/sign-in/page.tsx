@@ -1,5 +1,8 @@
+import type { Metadata } from "next";
 import { AuthForm } from "@/components/AuthForm";
 import { returnPath } from "@/lib/offers";
+
+export const metadata: Metadata = { title: "Anmelden | Kiku" };
 
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ next?: string | string[] }> }) {
   const { next } = await searchParams;

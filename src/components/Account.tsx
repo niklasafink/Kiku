@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { authAttempt, authClient } from "@/lib/authClient";
 import { bindToUser, pendingChanges, startBackgroundSync, syncNow, syncStore, wipeLocal } from "@/lib/sync";
 
 export interface AccountUser {
@@ -36,6 +35,10 @@ export function useSyncState() {
 }
 
 const USER_KEY = "kiku-user";
+
+// The auth client is large and only needed to sign out or delete the account, so pages that
+// visitors open (homepage, pricing) do not load it.
+const loadAuth = () => import("@/lib/authClient");
 
 function rememberUser(user: AccountUser | null) {
   try {
@@ -109,6 +112,7 @@ export function AccountProvider({ serverMode, children }: { serverMode: boolean;
     ) {
       return;
     }
+    const { authClient } = await loadAuth();
     await authClient.signOut();
     rememberUser(null);
     // The library stays in the account; this device keeps no copy for the next person.
@@ -132,6 +136,7 @@ export function AccountProvider({ serverMode, children }: { serverMode: boolean;
         throw new Error(data?.error ?? "Das Konto konnte nicht gelöscht werden. Bitte versuche es noch einmal.");
       }
       // The account is gone; what is left is this device's copy and its session cookies.
+      const { authAttempt, authClient } = await loadAuth();
       await authAttempt(() => authClient.signOut());
       rememberUser(null);
       await wipeLocal();

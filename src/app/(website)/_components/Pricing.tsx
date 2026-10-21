@@ -7,6 +7,7 @@ import { GitHubIcon } from "./GitHubIcon";
 import { HeroGlow } from "./HeroGlow";
 import { CARD, GITHUB_URL, H2, LEAD, SCREEN, WRAP } from "./shared";
 import { purchasePath } from "@/lib/offers";
+import { PRICING_QUESTIONS } from "../_lib/faq";
 
 // Like SCREEN, with less padding so the whole comparison fits on one laptop screen.
 const PRICING_SCREEN = `${WRAP} flex min-h-[calc(100svh-84px)] flex-col justify-center py-6 lg:py-8`;
@@ -122,38 +123,6 @@ const GROUPS: Group[] = [
   },
 ];
 
-const QUESTIONS = [
-  {
-    question: "Was ist im kostenlosen Tarif drin?",
-    answer:
-      "Die ganze App mit Konto und Sync: Karten, Ordner, Lernen, Import, Suche und Backup. Die KI prüft deine Antworten mit einem einfacheren Modell, die Spracheingabe läuft im Browser. Du kannst Kiku auch selbst hosten, der Quellcode steht unter MIT-Lizenz auf GitHub.",
-  },
-  {
-    question: "Was zählt als KI-Verarbeitung?",
-    answer:
-      "Jede Antwort, die die KI mit deiner Lösung abgleicht, egal ob gesprochen oder getippt. Wenn du eine Lösung nur aufdeckst, zählt das nicht.",
-  },
-  {
-    question: "Was passiert, wenn mein Kontingent aufgebraucht ist?",
-    answer:
-      "Du kannst weiter Karten anlegen, lernen und Lösungen aufdecken. Für weitere Auswertungen kaufst du ein Kontingent zum Selbstkostenpreis dazu oder wartest, bis dein Kontingent sich erneuert.",
-  },
-  {
-    question: "Worin unterscheiden sich monatlich und jährlich?",
-    answer:
-      "Im Preis und im Kontingent: Monatlich zahlst du 4,99 € und bekommst 300 KI-Verarbeitungen pro Monat. Jährlich sind es 29 €, also 2,42 € im Monat, mit 500 KI-Verarbeitungen pro Monat. Beides ist zum Ende der Laufzeit kündbar.",
-  },
-  {
-    question: "Wie lange reicht der Einmalkauf?",
-    answer:
-      "Die App gehört dir dauerhaft, ohne Verlängerung. Das KI-Kontingent von 4.000 Verarbeitungen pro Jahr ist für zwei Jahre enthalten, danach kaufst du Kontingente zum Selbstkostenpreis dazu.",
-  },
-  {
-    question: "Was bleibt, wenn ich kündige?",
-    answer: "Deine Karten, Ordner und dein Verlauf bleiben erhalten und lassen sich jederzeit als Backup exportieren.",
-  },
-];
-
 const PRO_COLUMN = "bg-primary/6";
 // Group titles in the same typeface and case as the rows, only a little stronger.
 const GROUP_LABEL = "text-sm font-semibold opacity-80";
@@ -194,6 +163,7 @@ function BillingToggle({ value, onChange }: { value: Billing; onChange: (billing
           type="button"
           role="radio"
           aria-checked={value === option.id}
+          aria-label={option.label}
           onClick={() => onChange(option.id)}
           className={`rounded-full px-5 py-2 text-sm font-semibold transition-opacity ${
             value === option.id ? "" : "opacity-60 hover:opacity-100"
@@ -335,7 +305,7 @@ function Faq() {
           </a>
         </div>
         <div className="flex flex-col gap-3">
-          {QUESTIONS.map((item) => (
+          {PRICING_QUESTIONS.map((item) => (
             <details key={item.question} className={`group ${CARD} open:border-primary/40`}>
               <summary className="flex cursor-pointer list-none items-center justify-between gap-6 px-5 py-4 text-lg font-semibold [&::-webkit-details-marker]:hidden">
                 {item.question}

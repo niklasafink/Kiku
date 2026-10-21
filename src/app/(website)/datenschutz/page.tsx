@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { AnalyticsOptOut, ConsentSettingsButton } from "../_components/Analytics";
 import { LegalPage } from "../_components/LegalPage";
+import { NOINDEX } from "../_lib/seo";
 import { SERVER_MODE } from "@/server/auth";
 
 export const metadata: Metadata = {
   title: "Datenschutz | Kiku",
   description: "Welche Daten Kiku verarbeitet, wofür, und welche Dienstleister beteiligt sind.",
+  robots: NOINDEX,
 };
 
 // Written from what the code actually does (hosting, database, AI provider, sign-up notice, analytics).

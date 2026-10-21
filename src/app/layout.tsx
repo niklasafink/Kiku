@@ -22,8 +22,11 @@ export const metadata: Metadata = {
   description: DESCRIPTION,
   applicationName: "kiku",
   appleWebApp: { capable: true, title: "kiku", statusBarStyle: "default" },
+  // Only the pages of the website ask to be indexed (see their metadata); the app behind the
+  // login, shared folders and the sign-in forms stay out of search results.
+  robots: { index: false, follow: true },
   // Title and description come from each page; the image is the one next to this file.
-  openGraph: { type: "website", siteName: "kiku", locale: "de_DE", url: "/" },
+  openGraph: { type: "website", siteName: "Kiku", locale: "de_DE" },
   twitter: { card: "summary_large_image" },
 };
 

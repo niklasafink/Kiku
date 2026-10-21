@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LegalPage } from "../_components/LegalPage";
+import { NOINDEX } from "../_lib/seo";
 import { SERVER_MODE } from "@/server/auth";
 
 export const metadata: Metadata = {
   title: "AGB | Kiku",
   description: "Nutzungsbedingungen für die von Dealzforest betriebene Kiku-App, inklusive Widerrufsbelehrung.",
+  robots: NOINDEX,
 };
 
 // Entwurf: vor Veröffentlichung juristisch prüfen lassen.

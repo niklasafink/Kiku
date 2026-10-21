@@ -78,7 +78,7 @@ export function AuthForm({ mode, next }: { mode: "sign-in" | "sign-up"; next?: s
   }
 
   return (
-    <div className="grid min-h-dvh place-items-center bg-base-200 p-4">
+    <main className="grid min-h-dvh place-items-center bg-base-200 p-4">
       <form onSubmit={handleSubmit} className="tile pop-in flex w-full max-w-sm flex-col gap-4 p-6">
         <div className="flex items-center gap-2 text-xl font-black">
           <KikuWordmark />
@@ -88,7 +88,7 @@ export function AuthForm({ mode, next }: { mode: "sign-in" | "sign-up"; next?: s
         {signUp && (
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-bold">Name</span>
-            <input className="input w-full" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+            <input className="input w-full" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" enterKeyHint="next" />
           </label>
         )}
         <label className="flex flex-col gap-1.5">
@@ -100,6 +100,7 @@ export function AuthForm({ mode, next }: { mode: "sign-in" | "sign-up"; next?: s
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="email"
+            enterKeyHint="next"
             autoFocus
           />
         </label>
@@ -113,6 +114,7 @@ export function AuthForm({ mode, next }: { mode: "sign-in" | "sign-up"; next?: s
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete={signUp ? "new-password" : "current-password"}
+            enterKeyHint="go"
           />
           {signUp && <span className="text-xs opacity-60">Mindestens 8 Zeichen</span>}
         </label>
@@ -146,6 +148,6 @@ export function AuthForm({ mode, next }: { mode: "sign-in" | "sign-up"; next?: s
           </Link>
         </p>
       </form>
-    </div>
+    </main>
   );
 }

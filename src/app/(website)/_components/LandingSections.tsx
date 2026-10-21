@@ -17,6 +17,7 @@ import shotGraded from "../_assets/shot-graded.png";
 import shotInput from "../_assets/shot-input.png";
 import shotPhoneMic from "../_assets/shot-phone-mic.png";
 import { H2, LEAD, SECTION_LABEL } from "./shared";
+import { HOME_QUESTIONS } from "../_lib/faq";
 
 /*
  * The homepage below the hero: one headline, at most one line of text and one real screenshot
@@ -336,38 +337,13 @@ export function Features() {
   );
 }
 
-const QUESTIONS = [
-  {
-    question: "Was ist Active Recall?",
-    answer: "Du holst die Antwort aus dem Kopf, statt sie zu lesen. So wirst du auch in der Klausur gefragt.",
-  },
-  {
-    question: "Wie bewertet die KI?",
-    answer:
-      "Sie vergleicht deine Antwort mit deiner eigenen Lösung, Satz für Satz. Grün ist genannt, grau fehlt, rot ist unsicher oder widersprüchlich.",
-  },
-  {
-    question: "Für welche Fächer?",
-    answer: "Für alles, was du in Sätzen wiedergeben musst: Jura, Medizin, BWL, Naturwissenschaften.",
-  },
-  {
-    question: "Kann ich meine Karten importieren?",
-    answer: "Ja, aus Anki und aus Tabellen. Exportieren kannst du sie genauso.",
-  },
-  {
-    question: "Ist Kiku kostenlos?",
-    answer:
-      "Ja. Mit einem kostenlosen Konto lernst du sofort, mit KI-Auswertung und Sync. Pro prüft genauer und versteht dich beim Sprechen besser. Der Code ist offen, du kannst Kiku auch selbst hosten.",
-  },
-];
-
 export function Questions() {
   return (
     <section id="faq" className={SECTION}>
       <div className={COLUMN}>
         <h2 className={`${H2} text-center`}>Häufige Fragen</h2>
         <div className="mx-auto mt-10 max-w-[760px] border-b border-base-300">
-          {QUESTIONS.map((item) => (
+          {HOME_QUESTIONS.map((item) => (
             <details key={item.question} className="group border-t border-base-300">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-6 py-4.5 text-lg font-bold [&::-webkit-details-marker]:hidden">
                 {item.question}
