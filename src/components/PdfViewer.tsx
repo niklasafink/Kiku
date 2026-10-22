@@ -49,6 +49,7 @@ function Page({
   root,
   strokes,
   marking,
+  report: debug,
 }: {
   doc: PdfDocument;
   number: number;
@@ -62,6 +63,8 @@ function Page({
   strokes: Stroke[];
   /** Present while the reader marks; otherwise the markings are only shown. */
   marking?: Marking;
+  /** Only with ?pdfdebug in the address: told what was drawn, to find out why a page stays empty. */
+  report?: (message: string) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -124,8 +127,17 @@ function Page({
       target.height = buffer.height;
       target.getContext("2d")?.drawImage(buffer, 0, 0);
       drawn.current = key;
+      if (debug) {
+        const context = target.getContext("2d")!;
+        const data = context.getImageData(0, 0, target.width, target.height).data;
+        let dark = 0;
+        for (let i = 0; i < data.length; i += 28) if (data[i] < 110 && data[i + 3] > 200) dark++;
+        const text = await page.getTextContent();
+        debug(`Seite ${number}: ${target.width}x${target.height}, dunkle Pixel ${dark}, Textstücke ${text.items.length}`);
+      }
     })().catch((error) => {
       console.error(error);
+      debug?.(`Seite ${number} Fehler: ${(error as Error)?.name}: ${(error as Error)?.message}`.slice(0, 200));
       if (!cancelled) setFailed(true);
     });
 
@@ -133,7 +145,7 @@ function Page({
       cancelled = true;
       task?.cancel();
     };
-  }, [doc, number, drawWidth, near]);
+  }, [doc, number, drawWidth, near, debug]);
 
   const height = width * (size.height / size.width);
   // The markings are measured in units of a page 600 wide and shown at the size of the page.
@@ -242,6 +254,10 @@ export function PdfViewer({
     () => (marks ? { tool, fingerWrites, onChange: change, onSelection: select } : undefined),
     [marks, tool, fingerWrites, change, select],
   );
+  // ?pdfdebug in the address shows what the reader did, for a screenshot when a PDF looks wrong.
+  const [debug, setDebug] = useState<string[]>([]);
+  const [debugOn] = useState(() => typeof location !== "undefined" && location.search.includes("pdfdebug"));
+  const report = useMemo(() => (debugOn ? (message: string) => setDebug((list) => [...list.slice(-14), message]) : undefined), [debugOn]);
   const hasStrokes = Object.values(ink).some((strokes) => strokes.length > 0);
 
   const key = "id" in source ? source.id : null;
@@ -275,6 +291,13 @@ export function PdfViewer({
         if (!active) return void loading.destroy();
         setSizes({ 1: { width: first.width, height: first.height } });
         setDoc(opened);
+        if (location.search.includes("pdfdebug")) {
+          const has = (ok: boolean) => (ok ? "ja" : "NEIN");
+          setDebug([
+            `pdf.js ${pdfjs.version}, ${opened.numPages} Seiten, ${navigator.userAgent}`,
+            `withResolvers ${has(typeof Promise.withResolvers === "function")}, OffscreenCanvas ${has(typeof OffscreenCanvas !== "undefined")}, FontFace ${has(typeof FontFace !== "undefined")}, dpr ${window.devicePixelRatio}`,
+          ]);
+        }
         for (let from = 2; from <= count && active; from += 20) {
           const found: Record<number, PageSize> = {};
           await Promise.all(
@@ -514,6 +537,8 @@ export function PdfViewer({
         </div>
       )}
 
+      {debug.length > 0 && <pre className="max-h-40 overflow-auto border-b-2 border-base-300 bg-base-100 p-2 text-[10px] whitespace-pre-wrap">{debug.join("\n")}</pre>}
+
       <div
         ref={(element) => {
           scrollerRef.current = element;
@@ -557,6 +582,7 @@ export function PdfViewer({
                 root={scroller}
                 strokes={ink[i + 1] ?? NO_STROKES}
                 marking={marking}
+                report={report}
               />
             ))}
           </div>
