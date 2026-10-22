@@ -67,6 +67,7 @@ function Page({
   const canvas = useRef<HTMLCanvasElement>(null);
   const [near, setNear] = useState(number <= 2);
   const drawn = useRef<string>("");
+  const [failed, setFailed] = useState(false);
 
   // Only pages close to the visible area are drawn; far ones give their canvas back.
   useEffect(() => {
@@ -123,7 +124,10 @@ function Page({
       target.height = buffer.height;
       target.getContext("2d")?.drawImage(buffer, 0, 0);
       drawn.current = key;
-    })().catch((error) => console.error(error));
+    })().catch((error) => {
+      console.error(error);
+      if (!cancelled) setFailed(true);
+    });
 
     return () => {
       cancelled = true;
@@ -144,6 +148,7 @@ function Page({
       style={{ width, height }}
     >
       <canvas ref={canvas} className="absolute inset-0 h-full w-full" aria-label={`Seite ${number}`} role="img" />
+      {failed && <p className="absolute inset-x-0 top-4 px-4 text-center text-sm font-semibold text-error">Diese Seite konnte nicht gezeichnet werden.</p>}
       {near && width > 0 && (marking || strokes.length > 0) && (
         <div className="absolute inset-0 overflow-hidden">
           {marking ? (
@@ -263,17 +268,23 @@ export function PdfViewer({
         task = loading;
         const opened = await loading.promise;
         if (!active) return void loading.destroy();
-        // All page sizes up front, so the pages do not jump around when they are drawn.
-        const found: Record<number, PageSize> = {};
-        await Promise.all(
-          Array.from({ length: Math.min(opened.numPages, 400) }, async (_, i) => {
-            const view = (await opened.getPage(i + 1)).getViewport({ scale: 1 });
-            found[i + 1] = { width: view.width, height: view.height };
-          }),
-        );
+        // The reader shows at once, with the size of the first page for all; the other sizes follow in
+        // batches, so a long PDF is not waited for page by page.
+        const count = Math.min(opened.numPages, 400);
+        const first = (await opened.getPage(1)).getViewport({ scale: 1 });
         if (!active) return void loading.destroy();
-        setSizes(found);
+        setSizes({ 1: { width: first.width, height: first.height } });
         setDoc(opened);
+        for (let from = 2; from <= count && active; from += 20) {
+          const found: Record<number, PageSize> = {};
+          await Promise.all(
+            Array.from({ length: Math.min(20, count - from + 1) }, async (_, i) => {
+              const view = (await opened.getPage(from + i)).getViewport({ scale: 1 });
+              found[from + i] = { width: view.width, height: view.height };
+            }),
+          );
+          if (active) setSizes((was) => ({ ...was, ...found }));
+        }
       } catch (e) {
         if (!active) return;
         const name = (e as Error | null)?.name;
