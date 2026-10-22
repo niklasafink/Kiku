@@ -2,6 +2,9 @@
 // build brings its own copies of brand-new functions (Promise.try, Map.getOrInsertComputed,
 // Math.sumPrecise); with the modern build, browsers without them (Safari before 26.2, older
 // Chrome) fail on every PDF.
+import "./polyfills";
+import "./streamIterator";
+
 export type Pdfjs = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
 let loaded: Promise<Pdfjs> | undefined;
