@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Download, Maximize2, Minus, Plus, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, ExternalLink, Maximize2, Minus, Plus, TriangleAlert } from "lucide-react";
 import { InkOverlay, InkSurface, InkToolbar, useInkHistory, type Tool } from "@/components/Handwriting";
 import type { Stroke } from "@/lib/ink";
 import { DOCUMENT_OPTIONS, loadPdfjs } from "@/lib/pdfjs";
@@ -257,7 +257,13 @@ export function PdfViewer({
   // ?pdfdebug in the address shows what the reader did, for a screenshot when a PDF looks wrong.
   const [debug, setDebug] = useState<string[]>([]);
   const [debugOn] = useState(() => typeof location !== "undefined" && location.search.includes("pdfdebug"));
-  const report = useMemo(() => (debugOn ? (message: string) => setDebug((list) => [...list.slice(-14), message]) : undefined), [debugOn]);
+  const report = useMemo(() => (debugOn ? (message: string) => setDebug((list) => [...list.slice(-30), message]) : undefined), [debugOn]);
+  useEffect(() => {
+    if (!debugOn || typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel("pdfdebug");
+    channel.onmessage = (event) => setDebug((list) => [...list.slice(-30), String(event.data)]);
+    return () => channel.close();
+  }, [debugOn]);
   const hasStrokes = Object.values(ink).some((strokes) => strokes.length > 0);
 
   const key = "id" in source ? source.id : null;
@@ -293,7 +299,35 @@ export function PdfViewer({
         setDoc(opened);
         if (location.search.includes("pdfdebug")) {
           const has = (ok: boolean) => (ok ? "ja" : "NEIN");
-          setDebug([
+          // Does this browser draw a path the way the letters are drawn?
+          const probe = document.createElement("canvas");
+          probe.width = probe.height = 20;
+          const context = probe.getContext("2d")!;
+          const shape = new Path2D();
+          shape.moveTo(0, 0);
+          shape.lineTo(1, 0);
+          shape.lineTo(1, 1);
+          shape.closePath();
+          context.scale(18, -18);
+          context.translate(0.5, -0.5);
+          context.fill(shape);
+          const filled = context.getImageData(0, 0, 20, 20).data.some((value, i) => i % 4 === 3 && value > 0);
+          let evalOk = false;
+          try {
+            evalOk = new Function("return 1")() === 1;
+          } catch {
+            // Not allowed.
+          }
+          let ops = "";
+          try {
+            const list = await (await opened.getPage(1)).getOperatorList();
+            ops = `, Operationen ${list.fnArray.length}, Text-Operationen ${list.fnArray.filter((fn) => fn === pdfjs.OPS.showText).length}`;
+          } catch (error) {
+            ops = `, Operationen Fehler ${(error as Error).message}`;
+          }
+          setDebug((list) => [...list, `Pfad füllen ${has(filled)}, Funktion aus Text ${has(evalOk)}${ops}`]);
+          setDebug((list) => [
+            ...list,
             `pdf.js ${pdfjs.version}, ${opened.numPages} Seiten, ${navigator.userAgent}`,
             `withResolvers ${has(typeof Promise.withResolvers === "function")}, OffscreenCanvas ${has(typeof OffscreenCanvas !== "undefined")}, FontFace ${has(typeof FontFace !== "undefined")}, dpr ${window.devicePixelRatio}`,
           ]);
@@ -447,6 +481,17 @@ export function PdfViewer({
     if (target) scrollerRef.current?.scrollTo({ top: target.offsetTop - GUTTER, behavior: "smooth" });
   }
 
+  /** The PDF in a tab of its own, shown by the browser itself: a way out if the reader draws a page wrongly on a device. */
+  function openInBrowser() {
+    // Opened at once, filled when the bytes are there: browsers only allow a window as the answer to a tap.
+    const tab = window.open("", "_blank");
+    void (async () => {
+      const data = file ?? (key ? new Blob([(await pdfBytes(key)) ?? new ArrayBuffer(0)], { type: "application/pdf" }) : null);
+      if (!data || !tab) return void tab?.close();
+      tab.location.href = URL.createObjectURL(data);
+    })();
+  }
+
   function download() {
     const blob = file;
     void (async () => {
@@ -496,6 +541,9 @@ export function PdfViewer({
         </button>
         <button className={button} onClick={() => zoomTo(1)} disabled={!doc} aria-label="Seitenbreite" title="An die Breite anpassen">
           <Maximize2 className="size-4" />
+        </button>
+        <button className={button} onClick={openInBrowser} disabled={!doc} aria-label="Im Browser öffnen" title="In einem eigenen Tab öffnen, vom Browser selbst angezeigt">
+          <ExternalLink className="size-4" />
         </button>
         <button className={button} onClick={download} disabled={!doc} aria-label="PDF herunterladen" title="PDF herunterladen">
           <Download className="size-4" />
