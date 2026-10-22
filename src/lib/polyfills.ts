@@ -83,4 +83,17 @@ define(Uint8Array.prototype, "toBase64", function (this: Uint8Array) {
 define(Uint8Array, "fromBase64", (text: string) => Uint8Array.from(atob(text), (char) => char.charCodeAt(0)));
 define(Uint8Array, "fromHex", (text: string) => Uint8Array.from(text.match(/../g) ?? [], (pair) => parseInt(pair, 16)));
 
+// Safari before 17 lacks ArrayBuffer.transfer; pdf.js uses it to pass page data on, and without it a page
+// shows its lines but no text. The old buffer is emptied by handing it over, as the real function does.
+function transfer(this: ArrayBuffer, length?: number) {
+  const size = length ?? this.byteLength;
+  const moved = structuredClone(this, { transfer: [this] });
+  if (size === moved.byteLength) return moved;
+  const copy = new ArrayBuffer(size);
+  new Uint8Array(copy).set(new Uint8Array(moved, 0, Math.min(size, moved.byteLength)));
+  return copy;
+}
+define(ArrayBuffer.prototype, "transfer", transfer);
+define(ArrayBuffer.prototype, "transferToFixedLength", transfer);
+
 export {};
