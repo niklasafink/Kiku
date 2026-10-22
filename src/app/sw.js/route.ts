@@ -71,7 +71,7 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/") || url.pathname === "/sw.js") return;
   // Safari fails with "Load failed" on what a web worker loads when it goes through here, which left every PDF
   // unreadable: the worker script itself, and its imports, whose referrer is the worker script.
-  if (request.destination === "worker" || request.destination === "sharedworker" || /\.js$/.test(new URL(request.referrer || url, url).pathname)) return;
+  if (request.destination === "worker" || request.destination === "sharedworker" || /\\.js$/.test(new URL(request.referrer || url, url).pathname)) return;
 
   // Files with a hash in their name never change: the stored copy is as good as a fresh one.
   if (url.pathname.startsWith("/_next/static/")) {
