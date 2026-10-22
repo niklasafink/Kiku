@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ChevronDown, ChevronUp, Download, Maximize2, Minus, Plus, TriangleAlert } from "lucide-react";
 import { InkOverlay, InkSurface, InkToolbar, useInkHistory, type Tool } from "@/components/Handwriting";
 import type { Stroke } from "@/lib/ink";
-import { loadPdfjs } from "@/lib/pdfjs";
+import { DOCUMENT_OPTIONS, loadPdfjs } from "@/lib/pdfjs";
 import { pdfBytes } from "@/lib/pdfFiles";
 import { INK_PAGE_WIDTH, type PageInk } from "@/lib/pdfInk";
 
@@ -264,7 +264,7 @@ export function PdfViewer({
         const data = key ? await pdfBytes(key) : file ? await file.arrayBuffer() : null;
         if (!data) throw new Error("missing");
         const pdfjs = await loadPdfjs();
-        const loading = pdfjs.getDocument({ data });
+        const loading = pdfjs.getDocument({ data, ...DOCUMENT_OPTIONS });
         task = loading;
         const opened = await loading.promise;
         if (!active) return void loading.destroy();

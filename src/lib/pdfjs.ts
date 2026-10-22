@@ -21,3 +21,18 @@ export function loadPdfjs(): Promise<Pdfjs> {
   });
   return loaded;
 }
+
+/**
+ * How documents are opened. Letters are drawn as shapes instead of through the browser's font loading:
+ * Safari on iPad at times does not take the fonts a PDF brings, and then a page shows its lines and
+ * tables but no text. The data pdf.js needs for fonts, character maps and image formats is served
+ * from public/pdfjs (a copy of the folders of the same names in node_modules/pdfjs-dist; update it
+ * together with the package).
+ */
+export const DOCUMENT_OPTIONS = {
+  disableFontFace: true,
+  cMapUrl: "/pdfjs/cmaps/",
+  cMapPacked: true,
+  standardFontDataUrl: "/pdfjs/standard_fonts/",
+  wasmUrl: "/pdfjs/wasm/",
+};

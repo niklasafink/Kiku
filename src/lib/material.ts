@@ -2,7 +2,7 @@
 // the browser and only their text goes to the AI, so the size of a file does not matter. Pages
 // without a text layer (scans, photos) are sent as pictures, one at a time, to be read.
 import { readDocx, readPptx } from "./office";
-import { loadPdfjs } from "./pdfjs";
+import { DOCUMENT_OPTIONS, loadPdfjs } from "./pdfjs";
 import "./streamIterator";
 
 export class MaterialError extends Error {}
@@ -40,7 +40,7 @@ async function readPicture(image: Blob, kind: ReadKind): Promise<string> {
 
 async function readPdf(data: ArrayBuffer, kind: ReadKind, onProgress?: (done: number, total: number) => void): Promise<string[]> {
   const pdfjs = await loadPdfjs();
-  const task = pdfjs.getDocument({ data });
+  const task = pdfjs.getDocument({ data, ...DOCUMENT_OPTIONS });
   const document = await task.promise;
   const pages: string[] = [];
   let scanned = 0;
