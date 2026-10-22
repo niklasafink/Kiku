@@ -464,9 +464,27 @@ export function PdfViewer({
     };
   }, [scroller, zoomTo]);
 
+  // Where the reader was. A tab that is hidden gives its reader no size at all and the browser forgets
+  // its scroll position; shown again, it is put back.
+  const lastScroll = useRef({ top: 0, left: 0 });
+  const widthRef = useRef(0);
+  useEffect(() => {
+    widthRef.current = viewWidth;
+  }, [viewWidth]);
+  useLayoutEffect(() => {
+    const element = scrollerRef.current;
+    if (!element || viewWidth === 0 || (element.scrollTop !== 0 && element.scrollLeft !== 0)) return;
+    const { top, left } = lastScroll.current;
+    if (element.scrollTop === 0) element.scrollTop = top;
+    if (element.scrollLeft === 0) element.scrollLeft = left;
+  }, [viewWidth]);
+
   // Which page is in view, for the counter.
   const onScroll = useCallback(() => {
     if (!scroller) return;
+    // While the reader has no size yet (just shown again) the pages are collapsed and the browser moved it to the top.
+    if (widthRef.current === 0 || scroller.clientWidth === 0) return;
+    lastScroll.current = { top: scroller.scrollTop, left: scroller.scrollLeft };
     const middle = scroller.scrollTop + scroller.clientHeight / 3;
     let found = 1;
     for (const element of scroller.querySelectorAll<HTMLElement>("[data-page]")) {
