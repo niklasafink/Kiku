@@ -181,13 +181,6 @@ export function RichEditor(props: EditorProps) {
             ink={markings[pdfs[Math.min(chosen, pdfs.length - 1)].id]}
             onInk={props.preview ? undefined : (next) => mark(pdfs[Math.min(chosen, pdfs.length - 1)].id, next)}
           />
-          {/* The text read from the PDF is what the grading compares with; it stays editable. */}
-          <details className="group">
-            <summary className="cursor-pointer text-xs font-semibold opacity-70">Text aus der PDF (für den Abgleich) ansehen und ändern</summary>
-            <div className="mt-1.5">
-              <TextEditor {...props} label="Text" value={body} onChange={(text) => props.onChange(joinPdfs(text, pdfs, inkId))} minHeight="8rem" />
-            </div>
-          </details>
         </>
       ) : (
         <TextEditor {...props} value={body} onChange={(text) => props.onChange(joinPdfs(text, pdfs, inkId))} />

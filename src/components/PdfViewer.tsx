@@ -282,8 +282,9 @@ export function PdfViewer({
             ? "Die PDF ist mit einem Passwort geschützt."
             : (e as Error | null)?.message === "missing"
               ? "Die PDF ist auf diesem Gerät nicht vorhanden und nicht im Konto."
-              : "Die PDF konnte nicht geöffnet werden.",
+              : `Die PDF konnte nicht geöffnet werden (${[name, (e as Error | null)?.message].filter(Boolean).join(": ").slice(0, 160) || "unbekannter Fehler"}).`,
         );
+        console.error(e);
       }
     })();
     return () => {
