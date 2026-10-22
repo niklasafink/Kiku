@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent, type ReactNode } from "react";
 import { Eraser, Hand, Highlighter, Lasso, PenLine, Redo2, Slash, Trash2, Undo2, type LucideIcon } from "lucide-react";
 import {
   boxOf,
@@ -45,10 +45,12 @@ const HOLD_LENGTH = 24;
 const LEVEL = 0.04;
 /** Room around the selected writing in which it can be grabbed. */
 const GRAB = 12;
-const UNDO_STEPS = 100;
+export const UNDO_STEPS = 100;
+/** A page of a PDF gets fewer pixels than a sheet of paper: a document has many pages. */
+const PAGE_PIXELS = 6_000_000;
 
-type Tool = "pen" | "marker" | "line" | "eraser" | "lasso";
-const TOOLS: { tool: Tool; label: string; Icon: LucideIcon }[] = [
+export type Tool = "pen" | "marker" | "line" | "eraser" | "lasso";
+export const TOOLS: { tool: Tool; label: string; Icon: LucideIcon }[] = [
   { tool: "pen", label: "Stift. Halte den Stift am Ende still, dann wird der Strich gerade", Icon: PenLine },
   { tool: "marker", label: "Marker", Icon: Highlighter },
   { tool: "line", label: "Gerade Linie", Icon: Slash },
@@ -124,43 +126,51 @@ function scrollerOf(element: HTMLElement): Element | Window {
   return window;
 }
 
-/**
- * A long sheet of white paper to write on with Apple Pencil or another stylus, seen through a
- * window of fixed height. The pen writes, a finger scrolls the sheet in its window (the page
- * around it stays put), and a resting palm does nothing. The mouse always writes; "Finger
- * schreibt" lets a finger write too, for tablets without a pen.
- *
- * Besides the pen there is a marker, a straight line, an eraser that takes whole strokes away,
- * and a lasso that moves what it caught.
- *
- * On iPad the browser scrolls for the finger as it does anywhere else, and only the pen is
- * kept from scrolling. Other browsers cannot tell the two apart in time: there the browser
- * must not scroll over the sheet at all (it would scroll when the pen moves instead of
- * letting it write), and scrolling with a finger is done here.
- *
- * Two layers: the finished writing, and above it what is in the making (the stroke being
- * drawn, the lasso, the writing being moved). That one is painted anew with every movement.
- */
-export function Handwriting({
-  strokes,
-  onChange,
-  disabled,
-}: {
+/** A page of a PDF to mark: its size in the units the strokes are in, and how large it is shown. */
+export interface InkPage {
+  width: number;
+  height: number;
+  /** Screen pixels per unit. */
+  scale: number;
+}
+
+export interface InkSurfaceProps {
   strokes: Stroke[];
-  onChange: (strokes: Stroke[]) => void;
+  /** The sheet after a change, and as it was before (for the owner's undo). */
+  onChange: (next: Stroke[], before: Stroke[]) => void;
+  tool: Tool;
+  /** A finger writes too, as it does for the mouse. */
+  fingerWrites: boolean;
   disabled?: boolean;
-}) {
+  /** A page of a PDF: the surface has the size of the page, is see-through and does not grow. Otherwise it is ruled paper. */
+  page?: InkPage;
+  /** Told about what the lasso caught, with a way to delete it, and told again with null once it is gone. */
+  onSelection?: (selection: { count: number; remove: () => void } | null) => void;
+  /** Shown on the surface, e.g. a hint on an empty sheet. */
+  children?: ReactNode;
+}
+
+/**
+ * Where the pen writes: the finished writing and, above it, what is in the making (the stroke
+ * being drawn, the lasso, the writing being moved), which is painted anew with every movement.
+ * The pen writes, a finger scrolls (on iPad the browser scrolls for it and only the pen is kept
+ * from scrolling; elsewhere the scrolling is done here), and a resting palm does nothing.
+ * The mouse always writes; `fingerWrites` lets a finger write too, for tablets without a pen.
+ */
+export function InkSurface({ strokes, onChange, tool, fingerWrites, disabled, page, onSelection, children }: InkSurfaceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
-  const windowRef = useRef<HTMLDivElement>(null);
-  const [tool, setTool] = useState<Tool>("pen");
-  const [fingerWrites, setFingerWrites] = useState(false);
-  const [height, setHeight] = useState(() => Math.max(START_HEIGHT, inkBottom(strokes) + MARGIN));
-  // The sheet as it was before each change, and as it was before each change that was taken back.
-  const [history, setHistory] = useState<{ past: Stroke[][]; future: Stroke[][] }>({ past: [], future: [] });
-  // What the lasso caught. It counts only while all of it is still on the sheet.
-  const [caught, setCaught] = useState<Stroke[] | null>(null);
-  const selection = useMemo(() => (caught?.length && caught.every((stroke) => strokes.includes(stroke)) ? caught : null), [caught, strokes]);
+  const [grown, setHeight] = useState(() => Math.max(START_HEIGHT, inkBottom(strokes) + MARGIN));
+  // A sheet of paper grows with the writing; a page of a PDF has the size of the page.
+  const height = page ? page.height : strokes.length === 0 ? START_HEIGHT : grown;
+  const scale = page?.scale ?? 1;
+  const maxPixels = page ? PAGE_PIXELS : MAX_PIXELS;
+  // What the lasso caught, with the tool it was caught with. It counts only while all of it is still on the sheet.
+  const [caught, setCaught] = useState<{ strokes: Stroke[]; tool: Tool } | null>(null);
+  const selection = useMemo(
+    () => (caught && caught.tool === tool && caught.strokes.length > 0 && caught.strokes.every((stroke) => strokes.includes(stroke)) ? caught.strokes : null),
+    [caught, strokes, tool],
+  );
   // The finished writing as the lower layer shows it: what is selected lies on the upper one.
   const shown = useMemo(() => (selection ? strokes.filter((stroke) => !selection.includes(stroke)) : strokes), [strokes, selection]);
   const gesture = useRef<Gesture | null>(null);
@@ -183,9 +193,12 @@ export function Handwriting({
   const liveBox = useRef<Box>(NOTHING);
   const strokesRef = useRef(strokes);
   const selectionRef = useRef(selection);
+  // The latest `commit`, for what the owner calls later (a selection that is deleted).
+  const commitRef = useRef<(next: Stroke[]) => void>(() => {});
   useEffect(() => {
     strokesRef.current = strokes;
     selectionRef.current = selection;
+    commitRef.current = commit;
   });
 
   /** The layer's drawing context, scaled so one unit is one CSS pixel. */
@@ -209,7 +222,7 @@ export function Handwriting({
     const live = liveRef.current;
     if (!canvas || !live || canvas.clientWidth === 0) return;
     const width = canvas.clientWidth;
-    const ratio = Math.min(window.devicePixelRatio || 1, Math.sqrt(MAX_PIXELS / (width * height)));
+    const ratio = Math.min((window.devicePixelRatio || 1) * scale, Math.sqrt(maxPixels / (width * height)));
     const resized = canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio);
     if (resized) {
       for (const layer of [canvas, live]) {
@@ -220,7 +233,7 @@ export function Handwriting({
     } else if (painted.current === shown) return;
     paintBase(shown);
     painted.current = shown;
-  }, [shown, height, paintBase]);
+  }, [shown, height, scale, maxPixels, paintBase]);
 
   /** Paints what is in the making on the upper layer, at most once per frame of the screen. */
   const paintLive = useCallback(() => {
@@ -331,8 +344,9 @@ export function Handwriting({
   function toPoints(event: PointerEvent<HTMLCanvasElement>, samples: globalThis.PointerEvent[]): InkPoint[] {
     const rect = event.currentTarget.getBoundingClientRect();
     return samples.map((sample) => ({
-      x: sample.clientX - rect.left,
-      y: sample.clientY - rect.top,
+      // The page of a PDF is drawn in its own units and shown larger or smaller.
+      x: (sample.clientX - rect.left) / scale,
+      y: (sample.clientY - rect.top) / scale,
       // 0 from a pen means "not known yet", see settlePressure.
       pressure: sample.pointerType === "pen" ? sample.pressure : 0.5,
     }));
@@ -344,37 +358,15 @@ export function Handwriting({
     return toPoints(event, samples.length > 0 ? samples : [event.nativeEvent]);
   }
 
-  /** Puts a changed sheet in place of the current one; the current one can be had back with undo. */
+  /** Puts a changed sheet in place of the current one; the owner keeps the old one for undo. */
   function commit(next: Stroke[]) {
     const before = strokesRef.current;
-    setHistory(({ past }) => ({ past: [...past, before].slice(-UNDO_STEPS), future: [] }));
     strokesRef.current = next;
-    onChange(next);
+    onChange(next, before);
     // Keep room to write on: the sheet grows before the pen reaches its end.
+    if (page) return;
     const bottom = inkBottom(next);
-    if (bottom > height - MARGIN) setHeight(bottom + GROW_BY);
-  }
-
-  function undo() {
-    // An answer from an earlier visit comes without its history; then the last stroke goes.
-    const previous = history.past.at(-1) ?? strokes.slice(0, -1);
-    setHistory(({ past, future }) => ({ past: past.slice(0, -1), future: [...future, strokes] }));
-    setCaught(null);
-    onChange(previous);
-  }
-
-  function redo() {
-    const next = history.future.at(-1);
-    if (!next) return;
-    setHistory(({ past, future }) => ({ past: [...past, strokes], future: future.slice(0, -1) }));
-    setCaught(null);
-    onChange(next);
-  }
-
-  function choose(next: Tool) {
-    setTool(next);
-    setCaught(null);
-    offset.current = { x: 0, y: 0 };
+    setHeight(bottom > height - MARGIN ? bottom + GROW_BY : height);
   }
 
   /** The stroke becomes a line from where it began to where the pen is. */
@@ -423,7 +415,7 @@ export function Handwriting({
       const found = strokesInLoop(strokesRef.current, active.path);
       offset.current = { x: 0, y: 0 };
       selectionRef.current = found.length > 0 ? found : null;
-      setCaught(selectionRef.current);
+      setCaught(selectionRef.current && { strokes: selectionRef.current, tool });
     } else {
       const selected = selectionRef.current;
       const { x, y } = offset.current;
@@ -431,7 +423,7 @@ export function Handwriting({
       if (selected && (x !== 0 || y !== 0)) {
         const moved = new Map(selected.map((stroke) => [stroke, movedStroke(stroke, x, y)]));
         selectionRef.current = [...moved.values()];
-        setCaught(selectionRef.current);
+        setCaught(selectionRef.current && { strokes: selectionRef.current, tool });
         commit(strokesRef.current.map((stroke) => moved.get(stroke) ?? stroke));
       }
     }
@@ -597,116 +589,248 @@ export function Handwriting({
     finish(active);
   }
 
-  const empty = strokes.length === 0;
-  const canUndo = history.past.length > 0 || strokes.length > 0;
-  const iconButton = (active = false) => `btn btn-sm btn-square ${active ? "btn-primary" : "btn-ghost"}`;
+  // The owner shows the lasso's selection as a button of its own.
+  useEffect(() => {
+    if (!onSelection) return;
+    onSelection(selection ? { count: selection.length, remove: () => commitRef.current(strokesRef.current.filter((stroke) => !selection.includes(stroke))) } : null);
+  }, [selection, onSelection]);
+
   const cursor = tool === "eraser" ? "cursor-cell" : tool === "lasso" ? (selection ? "cursor-move" : "cursor-crosshair") : "cursor-crosshair";
+  const touchAction = nativeScroll ? (page ? "touch-pan-x touch-pan-y" : "touch-pan-y") : "touch-none";
+
+  return (
+    <div
+      className="relative origin-top-left"
+      style={page ? { width: page.width, height: page.height, transform: `scale(${page.scale})` } : { height }}
+    >
+      <canvas
+        ref={canvasRef}
+        role="img"
+        aria-label={page ? "Markierungen auf der Seite" : "Schreibfläche für deine handschriftliche Antwort"}
+        className={`block w-full select-none ${touchAction} ${cursor} ${page ? "mix-blend-multiply" : ""}`}
+        style={{
+          height,
+          // Faint ruling, like a writing pad.
+          ...(page
+            ? {}
+            : {
+                backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${LINE_GAP - 1}px, #e6e8ef ${LINE_GAP - 1}px, #e6e8ef ${LINE_GAP}px)`,
+              }),
+          WebkitTouchCallout: "none",
+        }}
+        onPointerDown={handleDown}
+        onPointerMove={handleMove}
+        onPointerUp={handleUp}
+        onPointerCancel={handleUp}
+        onContextMenu={(event) => event.preventDefault()}
+      />
+      <canvas ref={liveRef} aria-hidden className="pointer-events-none absolute inset-0 block w-full" style={{ height }} />
+      {children}
+    </div>
+  );
+}
+
+/** The tools, undo and redo, and the switch for writing with a finger: the same on paper and on a PDF. */
+export function InkToolbar({
+  tool,
+  onTool,
+  fingerWrites,
+  onFingerWrites,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  disabled,
+  selection,
+  canClear,
+  onClear,
+  clearLabel = "Blatt leeren",
+}: {
+  tool: Tool;
+  onTool: (tool: Tool) => void;
+  fingerWrites: boolean;
+  onFingerWrites: (on: boolean) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  disabled?: boolean;
+  /** What the lasso caught, to delete it. */
+  selection: { count: number; remove: () => void } | null;
+  canClear: boolean;
+  onClear: () => void;
+  clearLabel?: string;
+}) {
+  const iconButton = (active = false) => `btn btn-sm btn-square ${active ? "btn-primary" : "btn-ghost"}`;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="join" role="group" aria-label="Werkzeug">
+        {TOOLS.map(({ tool: option, label, Icon }) => (
+          <button
+            key={option}
+            type="button"
+            className={`btn btn-sm btn-square join-item ${tool === option ? "btn-primary" : "bg-base-100"}`}
+            aria-pressed={tool === option}
+            aria-label={label}
+            title={label}
+            onClick={() => onTool(option)}
+          >
+            <Icon className="size-4" />
+          </button>
+        ))}
+      </div>
+      <div className="flex">
+        <button type="button" className={iconButton()} onClick={onUndo} disabled={disabled || !canUndo} aria-label="Rückgängig" title="Rückgängig">
+          <Undo2 className="size-4" />
+        </button>
+        <button type="button" className={iconButton()} onClick={onRedo} disabled={disabled || !canRedo} aria-label="Wiederholen" title="Wiederholen">
+          <Redo2 className="size-4" />
+        </button>
+      </div>
+      <button
+        type="button"
+        className={iconButton(fingerWrites)}
+        aria-pressed={fingerWrites}
+        onClick={() => onFingerWrites(!fingerWrites)}
+        aria-label="Finger schreibt"
+        title="Ohne Apple Pencil: mit dem Finger schreiben statt scrollen"
+      >
+        <Hand className="size-4" />
+      </button>
+      {selection ? (
+        <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={selection.remove} disabled={disabled}>
+          <Trash2 className="size-4" /> Auswahl löschen
+        </button>
+      ) : (
+        <button type="button" className={`${iconButton()} ml-auto`} onClick={onClear} disabled={disabled || !canClear} aria-label={clearLabel} title={clearLabel}>
+          <Trash2 className="size-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Undo and redo for one owner of strokes: the states before each change, and before each change that was taken back. */
+export function useInkHistory<T>() {
+  const [history, setHistory] = useState<{ past: T[]; future: T[] }>({ past: [], future: [] });
+  return {
+    canUndo: history.past.length > 0,
+    canRedo: history.future.length > 0,
+    /** Records the state a change replaces. */
+    record: (before: T) => setHistory(({ past }) => ({ past: [...past, before].slice(-UNDO_STEPS), future: [] })),
+    /** Takes the last change back: gives the state before it, `now` being the state shown. */
+    undo: (now: T): T | undefined => {
+      const previous = history.past.at(-1);
+      if (previous === undefined) return undefined;
+      setHistory(({ past, future }) => ({ past: past.slice(0, -1), future: [...future, now] }));
+      return previous;
+    },
+    redo: (now: T): T | undefined => {
+      const next = history.future.at(-1);
+      if (next === undefined) return undefined;
+      setHistory(({ past, future }) => ({ past: [...past, now], future: future.slice(0, -1) }));
+      return next;
+    },
+    reset: () => setHistory({ past: [], future: [] }),
+  };
+}
+
+/**
+ * A long sheet of white paper to write on with Apple Pencil or another stylus, seen through a
+ * window of fixed height. The pen writes, a finger scrolls the sheet in its window (the page
+ * around it stays put), and a resting palm does nothing. The mouse always writes; "Finger
+ * schreibt" lets a finger write too, for tablets without a pen.
+ *
+ * Besides the pen there is a marker, a straight line, an eraser that takes whole strokes away,
+ * and a lasso that moves what it caught.
+ */
+export function Handwriting({
+  strokes,
+  onChange,
+  disabled,
+}: {
+  strokes: Stroke[];
+  onChange: (strokes: Stroke[]) => void;
+  disabled?: boolean;
+}) {
+  const windowRef = useRef<HTMLDivElement>(null);
+  const [tool, setTool] = useState<Tool>("pen");
+  const [fingerWrites, setFingerWrites] = useState(false);
+  const [selection, setSelection] = useState<{ count: number; remove: () => void } | null>(null);
+  const history = useInkHistory<Stroke[]>();
+
+  // An answer from an earlier visit comes without its history; then the last stroke goes.
+  const undo = () => onChange(history.undo(strokes) ?? strokes.slice(0, -1));
+  const redo = () => {
+    const next = history.redo(strokes);
+    if (next) onChange(next);
+  };
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="join" role="group" aria-label="Werkzeug">
-          {TOOLS.map(({ tool: option, label, Icon }) => (
-            <button
-              key={option}
-              type="button"
-              className={`btn btn-sm btn-square join-item ${tool === option ? "btn-primary" : "bg-base-100"}`}
-              aria-pressed={tool === option}
-              aria-label={label}
-              title={label}
-              onClick={() => choose(option)}
-            >
-              <Icon className="size-4" />
-            </button>
-          ))}
-        </div>
-        <div className="flex">
-          <button type="button" className={iconButton()} onClick={undo} disabled={disabled || !canUndo} aria-label="Rückgängig" title="Rückgängig">
-            <Undo2 className="size-4" />
-          </button>
-          <button
-            type="button"
-            className={iconButton()}
-            onClick={redo}
-            disabled={disabled || history.future.length === 0}
-            aria-label="Wiederholen"
-            title="Wiederholen"
-          >
-            <Redo2 className="size-4" />
-          </button>
-        </div>
-        <button
-          type="button"
-          className={iconButton(fingerWrites)}
-          aria-pressed={fingerWrites}
-          onClick={() => setFingerWrites((on) => !on)}
-          aria-label="Finger schreibt"
-          title="Ohne Apple Pencil: mit dem Finger schreiben statt scrollen"
-        >
-          <Hand className="size-4" />
-        </button>
-        {selection ? (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm ml-auto"
-            onClick={() => {
-              commit(strokes.filter((stroke) => !selection.includes(stroke)));
-              setCaught(null);
-            }}
-            disabled={disabled}
-          >
-            <Trash2 className="size-4" /> Auswahl löschen
-          </button>
-        ) : (
-          <button
-            type="button"
-            className={`${iconButton()} ml-auto`}
-            onClick={() => {
-              commit([]);
-              setHeight(START_HEIGHT);
-              windowRef.current?.scrollTo(0, 0);
-            }}
-            disabled={disabled || empty}
-            aria-label="Blatt leeren"
-            title="Blatt leeren"
-          >
-            <Trash2 className="size-4" />
-          </button>
-        )}
-      </div>
+      <InkToolbar
+        tool={tool}
+        onTool={setTool}
+        fingerWrites={fingerWrites}
+        onFingerWrites={setFingerWrites}
+        canUndo={history.canUndo || strokes.length > 0}
+        canRedo={history.canRedo}
+        onUndo={undo}
+        onRedo={redo}
+        disabled={disabled}
+        selection={selection}
+        canClear={strokes.length > 0}
+        onClear={() => {
+          history.record(strokes);
+          onChange([]);
+          windowRef.current?.scrollTo(0, 0);
+        }}
+      />
       {/* A window on the long sheet: it scrolls in here, the page around it stays where it is. */}
       <div
         ref={windowRef}
         className="h-[calc(100dvh-21rem)] min-h-80 overflow-y-auto overscroll-contain rounded-field border-2 border-base-300 bg-white"
       >
-      <div className="relative" style={{ height }}>
-        <canvas
-          ref={canvasRef}
-          role="img"
-          aria-label="Schreibfläche für deine handschriftliche Antwort"
-          className={`block w-full select-none ${nativeScroll ? "touch-pan-y" : "touch-none"} ${cursor}`}
-          style={{
-            height,
-            // Faint ruling, like a writing pad.
-            backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${LINE_GAP - 1}px, #e6e8ef ${LINE_GAP - 1}px, #e6e8ef ${LINE_GAP}px)`,
-            WebkitTouchCallout: "none",
+        <InkSurface
+          strokes={strokes}
+          onChange={(next, before) => {
+            history.record(before);
+            onChange(next);
           }}
-          onPointerDown={handleDown}
-          onPointerMove={handleMove}
-          onPointerUp={handleUp}
-          onPointerCancel={handleUp}
-          onContextMenu={(event) => event.preventDefault()}
-        />
-        <canvas ref={liveRef} aria-hidden className="pointer-events-none absolute inset-0 block w-full" style={{ height }} />
-        {empty && (
-          <p className="pointer-events-none absolute inset-x-0 top-20 px-4 text-center text-sm text-neutral/50">
-            Schreib mit dem Apple Pencil auf das Blatt. Mit einem Finger scrollst du es weiter.
-            <br />
-            Wenn du fertig bist, tippe auf „Fertig“: dann liest die KI deine Handschrift.
-          </p>
-        )}
+          tool={tool}
+          fingerWrites={fingerWrites}
+          disabled={disabled}
+          onSelection={setSelection}
+        >
+          {strokes.length === 0 && (
+            <p className="pointer-events-none absolute inset-x-0 top-20 px-4 text-center text-sm text-neutral/50">
+              Schreib mit dem Apple Pencil auf das Blatt. Mit einem Finger scrollst du es weiter.
+              <br />
+              Wenn du fertig bist, tippe auf „Fertig“: dann liest die KI deine Handschrift.
+            </p>
+          )}
+        </InkSurface>
       </div>
-      </div>
+    </div>
+  );
+}
+
+/** The markings on a page of a PDF, only to be seen. */
+export function InkOverlay({ strokes, page }: { strokes: Stroke[]; page: InkPage }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const target = canvas.current;
+    if (!target) return;
+    const ratio = Math.min((window.devicePixelRatio || 1) * page.scale, Math.sqrt(PAGE_PIXELS / (page.width * page.height)));
+    target.width = Math.round(page.width * ratio);
+    target.height = Math.round(page.height * ratio);
+    const context = target.getContext("2d")!;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    drawStrokes(context, strokes, INK);
+  }, [strokes, page.width, page.height, page.scale]);
+  return (
+    <div className="pointer-events-none absolute left-0 top-0 origin-top-left" style={{ width: page.width, height: page.height, transform: `scale(${page.scale})` }}>
+      <canvas ref={canvas} aria-hidden className="block mix-blend-multiply" style={{ width: page.width, height: page.height }} />
     </div>
   );
 }

@@ -4,7 +4,8 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { PdfViewer } from "@/components/PdfViewer";
 import { RichText } from "@/components/RichText";
-import { pdfRefs, splitPdfs } from "@/lib/richText";
+import { inkRef, pdfRefs } from "@/lib/richText";
+import { useInk } from "@/lib/useInk";
 
 export interface PaneTab {
   id: string;
@@ -93,6 +94,8 @@ export function DocWorkspace({
 export function SideView({ text, empty }: { text: string; empty?: string }) {
   const pdfs = pdfRefs(text);
   const [chosen, setChosen] = useState(0);
+  // What was marked on the PDFs when the card was edited: shown over the pages.
+  const ink = useInk(inkRef(text));
   if (pdfs.length === 0) {
     return text.trim() ? (
       <div className="tile p-4">
@@ -103,8 +106,6 @@ export function SideView({ text, empty }: { text: string; empty?: string }) {
     );
   }
   const pdf = pdfs[Math.min(chosen, pdfs.length - 1)];
-  const { body } = splitPdfs(text);
-  void body;
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
       {pdfs.length > 1 && (
@@ -116,7 +117,7 @@ export function SideView({ text, empty }: { text: string; empty?: string }) {
           ))}
         </div>
       )}
-      <PdfViewer key={pdf.id} source={{ id: pdf.id }} name={pdf.name} className="min-h-0 flex-1" />
+      <PdfViewer key={pdf.id} source={{ id: pdf.id }} name={pdf.name} className="min-h-0 flex-1" ink={ink[pdf.id]} />
     </div>
   );
 }

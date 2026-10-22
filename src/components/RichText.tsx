@@ -6,7 +6,7 @@ import { imageUrl } from "@/lib/images";
 // Layout and fonts of typeset formulas.
 import "katex/dist/katex.min.css";
 import { parseOcclusion, type Occlusion } from "@/lib/occlusion";
-import { isPdfAlt, PDF_ALT, parseBlocks, type Inline } from "@/lib/richText";
+import { isInkAlt, isPdfAlt, PDF_ALT, parseBlocks, type Inline } from "@/lib/richText";
 
 /**
  * Where pictures come from when the cards are not the viewer's own (a shared deck): a URL that
@@ -142,6 +142,8 @@ function renderInline(inlines: Inline[], overlay?: Overlay): ReactNode {
         return <Fragment key={i}>{overlay ? overlay.formula(inline.tex, formula, false) : formula}</Fragment>;
       }
       case "image": {
+        // The markings on a PDF are a file, nothing to see in the text.
+        if (isInkAlt(inline.alt)) return null;
         if (isPdfAlt(inline.alt)) {
           return (
             <span key={i} className="badge badge-soft my-0.5 mr-1 gap-1 py-3 font-semibold">

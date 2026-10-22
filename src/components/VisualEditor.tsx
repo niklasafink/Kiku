@@ -67,6 +67,7 @@ export default function VisualEditor({
   fill,
   focusKey = 0,
   modeSwitch,
+  preview: decided,
 }: {
   label: string;
   value: string;
@@ -79,9 +80,12 @@ export default function VisualEditor({
   focusKey?: number;
   /** Control for switching to the source view, shown next to the preview button. */
   modeSwitch?: ReactNode;
+  /** The page decides between preview and editing; the field then has no switch of its own. */
+  preview?: boolean;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState(false);
+  const [own, setPreview] = useState(false);
+  const preview = decided ?? own;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // What the editor shows, as card text.
@@ -207,10 +211,12 @@ export default function VisualEditor({
       {/* Label and view switches on one line, the tools on their own line below: nothing wraps in narrow columns. */}
       <div className="flex items-center gap-x-1">
         <span className="mr-auto text-sm font-bold">{label}</span>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview((shown) => !shown)} aria-pressed={preview} disabled={!value.trim() && !preview}>
-          {preview ? <Pencil className="size-4" /> : <Eye className="size-4" />}
-          {preview ? "Bearbeiten" : "Vorschau"}
-        </button>
+        {decided === undefined && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview((shown) => !shown)} aria-pressed={preview} disabled={!value.trim() && !preview}>
+            {preview ? <Pencil className="size-4" /> : <Eye className="size-4" />}
+            {preview ? "Bearbeiten" : "Vorschau"}
+          </button>
+        )}
         {modeSwitch}
         <input
           ref={fileInput}

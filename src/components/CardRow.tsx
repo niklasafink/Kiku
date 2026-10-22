@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Image as ImageIcon } from "lucide-react";
 import { ScoreBadge } from "@/components/score";
 import { StarButton, TagList } from "@/components/Tags";
-import { imageRefs, isPdfAlt, toPlainText } from "@/lib/richText";
+import { imageRefs, isAttachmentAlt, toPlainText } from "@/lib/richText";
 import type { Attempt, Card } from "@/lib/types";
 
 const FACE = "tile flex min-h-20 flex-col gap-1 px-4 py-3";
@@ -12,7 +12,7 @@ const FACE_LABEL = "text-[0.68rem] font-extrabold tracking-wide uppercase opacit
 const preview = (text: string) => toPlainText(text).replace(/^(\s*)[-*+]\s+/gm, "$1• ");
 
 /** The text shows a picture (a PDF attached to it does not count). */
-const hasPicture = (text: string) => imageRefs(text).some((ref) => !isPdfAlt(ref.alt));
+const hasPicture = (text: string) => imageRefs(text).some((ref) => !isAttachmentAlt(ref.alt));
 
 function Picture() {
   return (

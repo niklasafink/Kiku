@@ -593,7 +593,8 @@ export function StudySession({
       <Link href={backHref} className={`${iconButton} btn-ghost`} title="Lernen abbrechen und zurück" aria-label="Lernen abbrechen">
         <X className="size-4" />
       </Link>
-      <progress className="progress progress-primary order-last mx-1 h-1.5 basis-full sm:order-none sm:min-w-10 sm:flex-1 sm:basis-0" value={answered} max={cards.length} aria-label="Fortschritt" />
+      {/* Favourite, arrows and the count on the left, the progress in the middle, the rest on the right. */}
+      {docMode && handedIn && <LiveStar cardId={card.id} />}
       <div className="join shrink-0">
         <button className="btn join-item btn-sm btn-square bg-base-100" onClick={() => go(index - 1)} disabled={index === 0 || grading} aria-label="Vorherige Karte" title="Vorherige Karte (←)">
           <ArrowLeft className="size-4" />
@@ -611,13 +612,11 @@ export function StudySession({
           <ArrowRight className="size-4" />
         </button>
       </div>
+      <progress className="progress progress-primary order-last mx-1 h-1.5 basis-full sm:order-none sm:min-w-10 sm:flex-1 sm:basis-0" value={answered} max={cards.length} aria-label="Fortschritt" />
       {docMode && handedIn && (
-        <>
-          <LiveStar cardId={card.id} />
-          <Link href={`/c/${card.id}`} className={`${iconButton} btn-ghost`} title="Karte ansehen und bearbeiten" aria-label="Karte bearbeiten">
-            <Pencil className="size-4" />
-          </Link>
-        </>
+        <Link href={`/c/${card.id}`} className={`${iconButton} btn-ghost`} title="Karte ansehen und bearbeiten" aria-label="Karte bearbeiten">
+          <Pencil className="size-4" />
+        </Link>
       )}
       {handedIn && canSpeak() && (
         <button

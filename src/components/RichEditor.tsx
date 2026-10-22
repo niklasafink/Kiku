@@ -12,10 +12,13 @@ import {
   type ReactNode,
 } from "react";
 import { Bold, Code, Eye, FileText, Heading, Highlighter, ImagePlus, Italic, List, ListOrdered, Pencil, Sigma, Table, X } from "lucide-react";
+import { PdfViewer } from "@/components/PdfViewer";
 import { CardImage, RichText } from "@/components/RichText";
 import { ImageError, saveImage } from "@/lib/images";
 import { parseTable } from "@/lib/importCards";
 import { isPdf, PdfError, pdfText, savePdf } from "@/lib/pdfFiles";
+import { dropInk, hasMarkings, storeInk, type PageInk, type PdfInk } from "@/lib/pdfInk";
+import { useInk } from "@/lib/useInk";
 import { imageIds, imageMarkup, joinPdfs, splitPdfs, toMarkdownTable } from "@/lib/richText";
 import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
 
@@ -33,6 +36,13 @@ export interface EditorProps {
   fill?: boolean;
   /** Puts the cursor into the field whenever this changes. */
   focusKey?: number;
+  /**
+   * Shows the field the way the card will look (true) or for editing (false), decided by the page
+   * for all its fields; the field then has no switch of its own.
+   */
+  preview?: boolean;
+  /** An attached PDF is shown with tools to mark it, instead of the text that was read from it. */
+  markPdfs?: boolean;
 }
 
 // The visual editor brings a whole editing library; it is loaded when an editor is first shown.
@@ -56,14 +66,55 @@ function storedSource(): boolean {
  * card text (see pdfMarkup) but never reach the editors below: they edit the text without them.
  */
 export function RichEditor(props: EditorProps) {
-  const { body, pdfs } = splitPdfs(props.value);
+  const { body, pdfs, ink: inkId } = splitPdfs(props.value);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [chosen, setChosen] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "info" | "error"; text: string } | null>(null);
-  const latest = useRef({ props, body, pdfs });
+  const latest = useRef({ props, body, pdfs, inkId });
   useLayoutEffect(() => {
-    latest.current = { props, body, pdfs };
+    latest.current = { props, body, pdfs, inkId };
   });
+
+  // What was marked on the PDFs. Changes are kept in a new file a moment after the last stroke.
+  const stored = useInk(inkId);
+  const [edited, setEdited] = useState<PdfInk | null>(null);
+  const markings = edited ?? stored;
+  const pending = useRef<PdfInk | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Files that were replaced; one is removed when the next one replaces it, by when the card text no longer names it.
+  const replaced = useRef<string[]>([]);
+  const flushInk = useRef(() => {});
+  useEffect(() => {
+    flushInk.current = () => {
+      clearTimeout(timer.current);
+      const next = pending.current;
+      if (!next) return;
+      pending.current = null;
+      const { props: current, body: text, pdfs: attached, inkId: was } = latest.current;
+      const id = hasMarkings(next) ? storeInk(next) : null;
+      if (was) replaced.current.push(was);
+      while (replaced.current.length > 1) void dropInk(replaced.current.shift()!);
+      // The next change builds on this one, not on the text from before.
+      latest.current = { ...latest.current, inkId: id };
+      current.onChange(joinPdfs(text, attached, id));
+    };
+  });
+  useEffect(() => {
+    const leave = () => flushInk.current();
+    window.addEventListener("pagehide", leave);
+    return () => {
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
+  }, []);
+  function mark(pdf: string, next: PageInk) {
+    const all = { ...markings, [pdf]: next };
+    setEdited(all);
+    pending.current = all;
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => flushInk.current(), 500);
+  }
 
   async function attach(files: File[]) {
     const found = files.filter(isPdf);
@@ -79,7 +130,7 @@ export function RichEditor(props: EditorProps) {
         const room = MAX_CARD_TEXT - 200 * (current.pdfs.length + 1);
         const joined = text ? (current.body.trim() ? `${current.body.trimEnd()}\n\n${text}` : text) : current.body;
         const nextBody = joined.length > room ? joined.slice(0, room) : joined;
-        const next = joinPdfs(nextBody, [...current.pdfs, { id, name: file.name }]);
+        const next = joinPdfs(nextBody, [...current.pdfs, { id, name: file.name }], current.inkId);
         // The next file builds on this result, not on the text from before.
         latest.current = { ...current, body: nextBody, pdfs: [...current.pdfs, { id, name: file.name }] };
         current.props.onChange(next);
@@ -110,7 +161,37 @@ export function RichEditor(props: EditorProps) {
         void attach(files);
       }}
     >
-      <TextEditor {...props} value={body} onChange={(text) => props.onChange(joinPdfs(text, pdfs))} />
+      {props.markPdfs && pdfs.length > 0 ? (
+        <>
+          <span className="text-sm font-bold">{props.label}</span>
+          {pdfs.length > 1 && (
+            <div className="join self-start">
+              {pdfs.map((entry, i) => (
+                <button key={entry.id} type="button" className={`btn btn-xs join-item ${i === chosen ? "btn-active" : "bg-base-100"}`} onClick={() => setChosen(i)}>
+                  {entry.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <PdfViewer
+            key={pdfs[Math.min(chosen, pdfs.length - 1)].id}
+            source={{ id: pdfs[Math.min(chosen, pdfs.length - 1)].id }}
+            name={pdfs[Math.min(chosen, pdfs.length - 1)].name}
+            className="h-[70dvh] min-h-[28rem]"
+            ink={markings[pdfs[Math.min(chosen, pdfs.length - 1)].id]}
+            onInk={props.preview ? undefined : (next) => mark(pdfs[Math.min(chosen, pdfs.length - 1)].id, next)}
+          />
+          {/* The text read from the PDF is what the grading compares with; it stays editable. */}
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold opacity-70">Text aus der PDF (für den Abgleich) ansehen und ändern</summary>
+            <div className="mt-1.5">
+              <TextEditor {...props} label="Text" value={body} onChange={(text) => props.onChange(joinPdfs(text, pdfs, inkId))} minHeight="8rem" />
+            </div>
+          </details>
+        </>
+      ) : (
+        <TextEditor {...props} value={body} onChange={(text) => props.onChange(joinPdfs(text, pdfs, inkId))} />
+      )}
       <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
@@ -131,7 +212,7 @@ export function RichEditor(props: EditorProps) {
               className="opacity-60 hover:opacity-100"
               aria-label={`${pdf.name} entfernen`}
               title="PDF entfernen (der Text bleibt)"
-              onClick={() => props.onChange(joinPdfs(body, pdfs.filter((p) => p.id !== pdf.id)))}
+              onClick={() => props.onChange(joinPdfs(body, pdfs.filter((p) => p.id !== pdf.id), inkId))}
             >
               <X className="size-3.5" />
             </button>
@@ -202,13 +283,15 @@ function SourceEditor({
   fill,
   focusKey = 0,
   modeSwitch,
+  preview: decided,
 }: EditorProps & { modeSwitch?: ReactNode }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (focusKey) ref.current?.focus();
   }, [focusKey]);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState(false);
+  const [own, setPreview] = useState(false);
+  const preview = decided ?? own;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Where the cursor should go after the next render (set by toolbar actions).
@@ -390,16 +473,18 @@ function SourceEditor({
             {busy ? <span className="loading loading-spinner loading-xs" /> : <ImagePlus className="size-4" />}
           </button>
         </div>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={() => setPreview((shown) => !shown)}
-          aria-pressed={preview}
-          disabled={!value.trim() && !preview}
-        >
-          {preview ? <Pencil className="size-4" /> : <Eye className="size-4" />}
-          {preview ? "Bearbeiten" : "Vorschau"}
-        </button>
+        {decided === undefined && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => setPreview((shown) => !shown)}
+            aria-pressed={preview}
+            disabled={!value.trim() && !preview}
+          >
+            {preview ? <Pencil className="size-4" /> : <Eye className="size-4" />}
+            {preview ? "Bearbeiten" : "Vorschau"}
+          </button>
+        )}
         {modeSwitch}
         <input
           ref={fileInput}

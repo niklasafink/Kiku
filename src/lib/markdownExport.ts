@@ -1,6 +1,6 @@
 // The library as one Markdown document: a backup anyone can read in any editor, without this
 // app and without a network. It is made for reading, the import does not take it back.
-import { IMAGE_SCHEME, imageExtension, imageIds } from "./richText";
+import { IMAGE_SCHEME, imageExtension, imageIds, isInkAlt } from "./richText";
 import { pathTo } from "./tree";
 import type { Card, Folder, StoredImage } from "./types";
 import { writeZip, type ZipFile } from "./zipWrite";
@@ -23,6 +23,7 @@ export function cardsToMarkdown(
   const text = (value: string) =>
     value
       .replace(IMAGE_MARKUP, (_whole, alt: string, id: string) => {
+        if (isInkAlt(alt)) return "";
         const path = imagePath(id);
         return path ? `![${alt}](${path})` : MISSING_IMAGE;
       })

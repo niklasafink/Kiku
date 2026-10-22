@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { imageIds, parseBlocks, parseInline, toMarkdownTable, toPlainText } from "./richText";
+import { imageIds, imageRefs, inkRef, isAttachmentAlt, joinPdfs, parseBlocks, parseInline, splitPdfs, toMarkdownTable, toPlainText } from "./richText";
 
 describe("parseBlocks", () => {
   it("keeps plain text as paragraphs with their line breaks", () => {
@@ -106,5 +106,26 @@ describe("formulas", () => {
 
   it("keeps the source of a formula in the plain text", () => {
     expect(toPlainText("Energie: $E = mc^2$\n$$\nF = ma\n$$")).toBe("Energie: E = mc^2\n\nF = ma");
+  });
+});
+
+describe("attached PDFs and their markings", () => {
+  const pdfs = [{ id: "pdf-id-1", name: "Klausur.pdf" }];
+
+  it("splits a text into body, PDFs and the file with the markings, and joins them again", () => {
+    const text = joinPdfs("Aufgabe 1", pdfs, "ink-id-1");
+    expect(splitPdfs(text)).toEqual({ body: "Aufgabe 1", pdfs, ink: "ink-id-1" });
+    expect(joinPdfs("Aufgabe 1", pdfs, "ink-id-1")).toBe(text);
+  });
+
+  it("names the markings only where a PDF is attached", () => {
+    expect(joinPdfs("Text", [], "ink-id-1")).toBe("Text");
+    expect(inkRef(joinPdfs("", pdfs))).toBeNull();
+  });
+
+  it("does not take the markings for a picture", () => {
+    const text = joinPdfs("", pdfs, "ink-id-1");
+    expect(imageRefs(text).filter((ref) => !isAttachmentAlt(ref.alt))).toEqual([]);
+    expect(toPlainText(text)).toBe("");
   });
 });

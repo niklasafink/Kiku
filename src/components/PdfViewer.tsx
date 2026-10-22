@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Download, Maximize2, Minus, Plus, TriangleAlert } from "lucide-react";
+import { InkOverlay, InkSurface, InkToolbar, useInkHistory, type Tool } from "@/components/Handwriting";
+import type { Stroke } from "@/lib/ink";
 import { loadPdfjs } from "@/lib/pdfjs";
 import { pdfBytes } from "@/lib/pdfFiles";
+import { INK_PAGE_WIDTH, type PageInk } from "@/lib/pdfInk";
 
 type PdfDocument = import("pdfjs-dist/legacy/build/pdf.mjs").PDFDocumentProxy;
 type RenderTask = import("pdfjs-dist/legacy/build/pdf.mjs").RenderTask;
@@ -29,6 +32,14 @@ interface PageSize {
   height: number;
 }
 
+/** What marking a page needs, the same for every page. */
+interface Marking {
+  tool: Tool;
+  fingerWrites: boolean;
+  onChange: (page: number, next: Stroke[], before: Stroke[]) => void;
+  onSelection: (page: number, selection: { count: number; remove: () => void } | null) => void;
+}
+
 function Page({
   doc,
   number,
@@ -36,6 +47,8 @@ function Page({
   drawWidth,
   size,
   root,
+  strokes,
+  marking,
 }: {
   doc: PdfDocument;
   number: number;
@@ -45,6 +58,10 @@ function Page({
   drawWidth: number;
   size: PageSize;
   root: HTMLElement | null;
+  /** What was marked on the page. */
+  strokes: Stroke[];
+  /** Present while the reader marks; otherwise the markings are only shown. */
+  marking?: Marking;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -115,6 +132,10 @@ function Page({
   }, [doc, number, drawWidth, near]);
 
   const height = width * (size.height / size.width);
+  // The markings are measured in units of a page 600 wide and shown at the size of the page.
+  const ink = { width: INK_PAGE_WIDTH, height: INK_PAGE_WIDTH * (size.height / size.width), scale: width / INK_PAGE_WIDTH };
+  const report = marking?.onSelection;
+  const onSelection = useCallback((selection: { count: number; remove: () => void } | null) => report?.(number, selection), [report, number]);
   return (
     <div
       ref={box}
@@ -123,16 +144,51 @@ function Page({
       style={{ width, height }}
     >
       <canvas ref={canvas} className="absolute inset-0 h-full w-full" aria-label={`Seite ${number}`} role="img" />
+      {near && width > 0 && (marking || strokes.length > 0) && (
+        <div className="absolute inset-0 overflow-hidden">
+          {marking ? (
+            <InkSurface
+              strokes={strokes}
+              onChange={(next, before) => marking.onChange(number, next, before)}
+              tool={marking.tool}
+              fingerWrites={marking.fingerWrites}
+              page={ink}
+              onSelection={onSelection}
+            />
+          ) : (
+            <InkOverlay strokes={strokes} page={ink} />
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
+const NO_INK: PageInk = {};
+const NO_STROKES: Stroke[] = [];
 
 /**
  * Reads a PDF in the page: scrolling through all pages, zooming with the buttons, the keys
  * (+ − 0), ⌘/Strg + mouse wheel, a pinch on touch screens, and a double tap or double click.
  * Only the pages near the visible area are drawn.
+ *
+ * With `onInk` the reader can also mark the pages: with the pen, the marker, a straight line (for
+ * underlining), the eraser and the lasso, the tools of the handwritten answer. `ink` holds what was marked
+ * and is shown either way.
  */
-export function PdfViewer({ source, name, className = "" }: { source: PdfSource; name?: string; className?: string }) {
+export function PdfViewer({
+  source,
+  name,
+  className = "",
+  ink = NO_INK,
+  onInk,
+}: {
+  source: PdfSource;
+  name?: string;
+  className?: string;
+  ink?: PageInk;
+  onInk?: (next: PageInk) => void;
+}) {
   const [doc, setDoc] = useState<PdfDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sizes, setSizes] = useState<Record<number, PageSize>>({});
@@ -148,6 +204,40 @@ export function PdfViewer({ source, name, className = "" }: { source: PdfSource;
   const anchor = useRef<{ x: number; y: number; from: number } | null>(null);
   const zoomRef = useRef(zoom);
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Marking: the tool, the history of the markings, and what the lasso caught (on one page at a time).
+  const [tool, setTool] = useState<Tool>("marker");
+  const [fingerWrites, setFingerWrites] = useState(false);
+  const [selected, setSelected] = useState<{ page: number; count: number; remove: () => void } | null>(null);
+  const history = useInkHistory<PageInk>();
+  const inkRef = useRef(ink);
+  const onInkRef = useRef(onInk);
+  useEffect(() => {
+    inkRef.current = ink;
+    onInkRef.current = onInk;
+  });
+  const marks = onInk !== undefined;
+  const change = useCallback(
+    (page: number, next: Stroke[], before: Stroke[]) => {
+      void before;
+      const current = inkRef.current;
+      history.record(current);
+      // Two changes before the next render both build on this one.
+      inkRef.current = { ...current, [page]: next };
+      onInkRef.current?.(inkRef.current);
+    },
+    // `record` only sets state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const select = useCallback((page: number, selection: { count: number; remove: () => void } | null) => {
+    setSelected((was) => (selection ? { page, ...selection } : was?.page === page ? null : was));
+  }, []);
+  const marking = useMemo<Marking | undefined>(
+    () => (marks ? { tool, fingerWrites, onChange: change, onSelection: select } : undefined),
+    [marks, tool, fingerWrites, change, select],
+  );
+  const hasStrokes = Object.values(ink).some((strokes) => strokes.length > 0);
 
   const key = "id" in source ? source.id : null;
   const file = "file" in source ? source.file : null;
@@ -377,6 +467,41 @@ export function PdfViewer({ source, name, className = "" }: { source: PdfSource;
         </button>
       </div>
 
+      {marks && (
+        <div className="border-b-2 border-base-300 bg-base-100 px-1.5 py-1">
+          <InkToolbar
+            tool={tool}
+            onTool={setTool}
+            fingerWrites={fingerWrites}
+            onFingerWrites={setFingerWrites}
+            canUndo={history.canUndo}
+            canRedo={history.canRedo}
+            onUndo={() => {
+              const previous = history.undo(inkRef.current);
+              if (previous) {
+                inkRef.current = previous;
+                onInk(previous);
+              }
+            }}
+            onRedo={() => {
+              const next = history.redo(inkRef.current);
+              if (next) {
+                inkRef.current = next;
+                onInk(next);
+              }
+            }}
+            selection={selected}
+            canClear={hasStrokes}
+            onClear={() => {
+              history.record(inkRef.current);
+              inkRef.current = {};
+              onInk({});
+            }}
+            clearLabel="Alle Markierungen entfernen"
+          />
+        </div>
+      )}
+
       <div
         ref={(element) => {
           scrollerRef.current = element;
@@ -388,7 +513,7 @@ export function PdfViewer({ source, name, className = "" }: { source: PdfSource;
         className="relative min-h-0 flex-1 touch-pan-x touch-pan-y overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         onScroll={onScroll}
         onDoubleClick={(event) => {
-          if (!scroller) return;
+          if (!scroller || marks) return;
           const rect = scroller.getBoundingClientRect();
           zoomTo(zoomRef.current > 1.05 ? 1 : 2, { x: event.clientX - rect.left, y: event.clientY - rect.top });
         }}
@@ -418,6 +543,8 @@ export function PdfViewer({ source, name, className = "" }: { source: PdfSource;
                 drawWidth={drawWidth}
                 size={sizes[i + 1] ?? first}
                 root={scroller}
+                strokes={ink[i + 1] ?? NO_STROKES}
+                marking={marking}
               />
             ))}
           </div>

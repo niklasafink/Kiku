@@ -36,6 +36,7 @@ it works on tablets, phones, Mac and Windows alike. On iPad you can add it to th
 - Search across all questions and solutions
 - Voice answers of any practical length: recorded in the browser, transcribed by an AI model
 - Typed answers as an alternative, and you can correct the transcript before grading
+- PDFs on cards (task, model solution): a reader beside the answer; when editing the card you mark the PDF with pen, marker, straight line, eraser and lasso, the tools of the handwritten answer, and the markings show up again when studying
 - Handwritten answers: write with Apple Pencil, another stylus or a finger; the AI reads the writing and grades it
 - Hands-free studying: the question is read aloud, you answer, the result is announced, the next card follows
 - After grading, the AI explains on request what was missing and how to remember it

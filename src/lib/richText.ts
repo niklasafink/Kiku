@@ -162,6 +162,19 @@ export function pdfMarkup(id: string, name: string): string {
   return `![${PDF_ALT}${clean}.pdf](${IMAGE_SCHEME}${id})`;
 }
 
+/**
+ * What a reader marked on the attached PDFs is kept in one small file next to them (see pdfInk.ts),
+ * attached like a picture with the alternative text "ink:". It is not a picture and not text.
+ */
+export const INK_ALT = "ink:";
+
+export const isInkAlt = (alt: string) => alt.startsWith(INK_ALT);
+
+/** Attachments the text only refers to: they are not shown as pictures. */
+export const isAttachmentAlt = (alt: string) => isPdfAlt(alt) || isInkAlt(alt);
+
+export const inkMarkup = (id: string) => `![${INK_ALT}](${IMAGE_SCHEME}${id})`;
+
 /** The PDFs attached to a text, in order. */
 export function pdfRefs(text: string): { id: string; name: string }[] {
   return imageRefs(text)
@@ -169,20 +182,25 @@ export function pdfRefs(text: string): { id: string; name: string }[] {
     .map((ref) => ({ id: ref.id, name: ref.alt.slice(PDF_ALT.length) || "Dokument.pdf" }));
 }
 
-/** The text without its attached PDFs, and the PDFs. The editors only ever see the text. */
-export function splitPdfs(text: string): { body: string; pdfs: { id: string; name: string }[] } {
-  const pdfs = pdfRefs(text);
-  if (pdfs.length === 0) return { body: text, pdfs };
-  const body = text
-    .replace(IMAGE_ALL, (whole, alt: string) => (isPdfAlt(alt) ? "" : whole))
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  return { body, pdfs };
+/** The file with the markings on the PDFs of a text, if there is one. */
+export function inkRef(text: string): string | null {
+  return imageRefs(text).find((ref) => isInkAlt(ref.alt))?.id ?? null;
 }
 
-/** Puts attached PDFs behind a text, each on a line of its own. */
-export function joinPdfs(body: string, pdfs: { id: string; name: string }[]): string {
-  const marks = pdfs.map((pdf) => pdfMarkup(pdf.id, pdf.name)).join("\n\n");
+/** The text without its attached PDFs and their markings, and the PDFs. The editors only ever see the text. */
+export function splitPdfs(text: string): { body: string; pdfs: { id: string; name: string }[]; ink: string | null } {
+  const pdfs = pdfRefs(text);
+  if (pdfs.length === 0 && !inkRef(text)) return { body: text, pdfs, ink: null };
+  const body = text
+    .replace(IMAGE_ALL, (whole, alt: string) => (isAttachmentAlt(alt) ? "" : whole))
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { body, pdfs, ink: inkRef(text) };
+}
+
+/** Puts attached PDFs (and the file with their markings) behind a text, each on a line of its own. */
+export function joinPdfs(body: string, pdfs: { id: string; name: string }[], ink?: string | null): string {
+  const marks = [...pdfs.map((pdf) => pdfMarkup(pdf.id, pdf.name)), ...(ink && pdfs.length > 0 ? [inkMarkup(ink)] : [])].join("\n\n");
   return marks ? (body.trim() ? `${body.trimEnd()}\n\n${marks}` : marks) : body;
 }
 

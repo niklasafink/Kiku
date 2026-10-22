@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { ArrowLeft, ArrowRight, CalendarDays, Check, Keyboard, Mic, PenLine, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Eye, Keyboard, Mic, Pencil, PenLine, Play, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
 import { Modal } from "@/components/Modal";
@@ -25,11 +25,30 @@ import type { Attempt, Card, Folder } from "@/lib/types";
 /** Pause after the last keystroke before the text is stored. */
 const AUTOSAVE_DELAY = 600;
 
+// Preview or editing, for both sides of the card at once. Kept outside the page, so it stays
+// the way it was chosen when the arrows move on to the next card.
+let previewing = false;
+const previewListeners = new Set<() => void>();
+function setPreviewing(on: boolean) {
+  previewing = on;
+  previewListeners.forEach((listener) => listener());
+}
+function usePreviewing() {
+  return useSyncExternalStore(
+    (listener) => {
+      previewListeners.add(listener);
+      return () => void previewListeners.delete(listener);
+    },
+    () => previewing,
+    () => false,
+  );
+}
+
 /**
  * Both sides of the card. Every change is stored by itself shortly after typing stops, and once
  * more when the page is left; there is nothing to press.
  */
-function CardEditor({ card, folders }: { card: Card; folders: Folder[] }) {
+function CardEditor({ card, folders, preview }: { card: Card; folders: Folder[]; preview: boolean }) {
   const [question, setQuestion] = useState(card.question);
   const [solution, setSolution] = useState(card.solution);
   // What the database holds as far as this editor knows; edits from elsewhere (sync) replace
@@ -91,8 +110,8 @@ function CardEditor({ card, folders }: { card: Card; folders: Folder[] }) {
     <div className="tile flex flex-col gap-3 p-4">
       {/* Both fields grow with their text, so a long solution is fully visible while editing. */}
       <div className="grid items-start gap-4 md:grid-cols-2">
-        <RichEditor label="Frage" value={question} onChange={setQuestion} minHeight="16rem" />
-        <RichEditor label="Deine Lösung" value={solution} onChange={setSolution} minHeight="16rem" />
+        <RichEditor label="Frage" value={question} onChange={setQuestion} minHeight="16rem" preview={preview} markPdfs />
+        <RichEditor label="Deine Lösung" value={solution} onChange={setSolution} minHeight="16rem" preview={preview} markPdfs />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="flex items-center gap-2">
@@ -213,6 +232,7 @@ export default function CardPage() {
   const allCards = useAllCards();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [now] = useState(() => Date.now());
+  const preview = usePreviewing();
 
   if (card === undefined || !folders || !attempts || !allCards) {
     return <div className="skeleton h-64 w-full rounded-box" />;
@@ -266,6 +286,16 @@ export default function CardPage() {
               </button>
             )}
           </div>
+          <button
+            type="button"
+            className="btn btn-sm bg-base-100"
+            onClick={() => setPreviewing(!preview)}
+            aria-pressed={preview}
+            title={preview ? "Zurück zum Bearbeiten, für beide Seiten" : "Beide Seiten so ansehen, wie die Karte aussieht"}
+          >
+            {preview ? <Pencil className="size-4" /> : <Eye className="size-4" />}
+            {preview ? "Bearbeiten" : "Vorschau"}
+          </button>
           {schedule && (
             <span className="flex items-center gap-1.5 text-sm font-semibold opacity-70">
               <CalendarDays className="size-4" aria-hidden />
@@ -279,7 +309,7 @@ export default function CardPage() {
       </header>
 
       <section aria-label="Karte">
-        <CardEditor key={card.id} card={card} folders={folders} />
+        <CardEditor key={card.id} card={card} folders={folders} preview={preview} />
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <StarButton card={card} />
           <TagEditor card={card} known={tagCounts(allCards).map((entry) => entry.tag)} />
