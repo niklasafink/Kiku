@@ -76,7 +76,7 @@ function FolderSession({
           cards={savedCards}
           backHref={backHref}
           sessionKey={key}
-          initial={{ index, states: saved.states }}
+          initial={{ index, states: saved.states, files: saved.files }}
           exam={exam}
         />
       );

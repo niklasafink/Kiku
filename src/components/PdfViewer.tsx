@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, ChevronUp, Download, ExternalLink, Maximize2, Minus, Plus, TriangleAlert } from "lucide-react";
 import { InkOverlay, InkSurface, InkToolbar, useInkHistory, type Tool } from "@/components/Handwriting";
 import type { Stroke } from "@/lib/ink";
@@ -23,6 +24,9 @@ const MAX_PIXELS = 14_000_000;
 const REDRAW_DELAY = 160;
 
 const clampZoom = (zoom: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+
+/** A place outside the reader for its tools for marking, e.g. next to the tabs of the study window. */
+export const ToolSlot = createContext<HTMLElement | null>(null);
 
 /** Where the PDF comes from: a card's stored file, or a file the user just picked. */
 export type PdfSource = { id: string } | { file: Blob };
@@ -234,6 +238,7 @@ export function PdfViewer({
     onInkRef.current = onInk;
   });
   const marks = onInk !== undefined;
+  const slot = useContext(ToolSlot);
   const change = useCallback(
     (page: number, next: Stroke[], before: Stroke[]) => {
       void before;
@@ -524,6 +529,39 @@ export function PdfViewer({
     })();
   }
 
+  const tools = marks && (
+    <InkToolbar
+      tool={tool}
+      onTool={setTool}
+      fingerWrites={fingerWrites}
+      onFingerWrites={setFingerWrites}
+      canUndo={history.canUndo}
+      canRedo={history.canRedo}
+      onUndo={() => {
+        const previous = history.undo(inkRef.current);
+        if (previous) {
+          inkRef.current = previous;
+          onInk(previous);
+        }
+      }}
+      onRedo={() => {
+        const next = history.redo(inkRef.current);
+        if (next) {
+          inkRef.current = next;
+          onInk(next);
+        }
+      }}
+      selection={selected}
+      canClear={hasStrokes}
+      onClear={() => {
+        history.record(inkRef.current);
+        inkRef.current = {};
+        onInk({});
+      }}
+      clearLabel="Alle Anmerkungen löschen"
+      clearText="Alle"
+    />
+  );
   const pages = doc?.numPages ?? 0;
   const button = "btn btn-ghost btn-xs btn-square";
   return (
@@ -568,41 +606,8 @@ export function PdfViewer({
         </button>
       </div>
 
-      {marks && (
-        <div className="border-b-2 border-base-300 bg-base-100 px-1.5 py-1">
-          <InkToolbar
-            tool={tool}
-            onTool={setTool}
-            fingerWrites={fingerWrites}
-            onFingerWrites={setFingerWrites}
-            canUndo={history.canUndo}
-            canRedo={history.canRedo}
-            onUndo={() => {
-              const previous = history.undo(inkRef.current);
-              if (previous) {
-                inkRef.current = previous;
-                onInk(previous);
-              }
-            }}
-            onRedo={() => {
-              const next = history.redo(inkRef.current);
-              if (next) {
-                inkRef.current = next;
-                onInk(next);
-              }
-            }}
-            selection={selected}
-            canClear={hasStrokes}
-            onClear={() => {
-              history.record(inkRef.current);
-              inkRef.current = {};
-              onInk({});
-            }}
-            clearLabel="Anmerkungen löschen"
-            clearText
-          />
-        </div>
-      )}
+      {tools && !slot && <div className="border-b-2 border-base-300 bg-base-100 px-1.5 py-1">{tools}</div>}
+      {tools && slot && createPortal(tools, slot)}
 
       {debug.length > 0 && <pre className="max-h-40 overflow-auto border-b-2 border-base-300 bg-base-100 p-2 text-[10px] whitespace-pre-wrap">{debug.join("\n")}</pre>}
 

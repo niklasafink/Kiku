@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { CalendarCheck, ChartNoAxesColumn, ChevronRight, CloudAlert, CloudCheck, Crown, Flame, House, Library, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings } from "lucide-react";
 import { AccountProvider, useAccount, useSyncState } from "@/components/Account";
@@ -19,6 +20,12 @@ import { pathTo } from "@/lib/tree";
 import type { Folder } from "@/lib/types";
 import { KikuWordmark } from "@/components/KikuWordmark";
 import { Toasts } from "@/components/Toasts";
+
+/**
+ * A page with a bar of its own at the top (the study window) offers its start here. With the sidebar
+ * folded away on a wide screen, its button and the logo then sit in that bar instead of a row above.
+ */
+export const BarSlot = createContext<(element: HTMLElement | null) => void>(() => {});
 
 /** Folders grouped by their parent and sorted by name, built once per change instead of once per row. */
 function groupByParent(folders: Folder[]): Map<string | null, Folder[]> {
@@ -230,6 +237,7 @@ function Shell({ children }: { children: ReactNode }) {
   const folders = useMemo(() => loadedFolders ?? [], [loadedFolders]);
   const [open, setOpen] = useState(false);
   const collapsed = useSidebarCollapsed();
+  const [barSlot, setBarSlot] = useState<HTMLElement | null>(null);
   const tree = useMemo(() => groupByParent(folders), [folders]);
   const storedOpenFolders = useOpenFolders();
   const openFolders = useMemo(() => parseOpenFolders(storedOpenFolders), [storedOpenFolders]);
@@ -290,7 +298,7 @@ function Shell({ children }: { children: ReactNode }) {
       />
       <div className={`drawer-content flex min-w-0 flex-col bg-base-200 ${collapsed ? "" : "lg:ml-64"}`}>
         <header
-          className={`navbar sticky top-0 z-30 min-h-12 gap-1 border-b-2 border-base-300 bg-base-100 px-2 pt-[env(safe-area-inset-top)] ${collapsed ? "" : "lg:hidden"}`}
+          className={`navbar sticky top-0 z-30 min-h-12 gap-1 border-b-2 border-base-300 bg-base-100 px-2 pt-[env(safe-area-inset-top)] ${collapsed && !barSlot ? "" : "lg:hidden"}`}
         >
           <label htmlFor="nav-drawer" className={`btn btn-ghost btn-square btn-sm ${collapsed ? "lg:hidden" : ""}`} aria-label="Menü öffnen">
             <Menu />
@@ -310,8 +318,26 @@ function Shell({ children }: { children: ReactNode }) {
           </Link>
         </header>
         <main className="mx-auto w-full max-w-[110rem] flex-1 px-4 py-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 lg:px-8">
-          {children}
+          <BarSlot.Provider value={setBarSlot}>{children}</BarSlot.Provider>
         </main>
+        {collapsed &&
+          barSlot &&
+          createPortal(
+            <div className="flex shrink-0 items-center max-lg:hidden">
+              <button
+                className="btn btn-ghost btn-square btn-sm"
+                aria-label="Seitenleiste einblenden"
+                title="Seitenleiste einblenden"
+                onClick={() => setSidebarCollapsed(false)}
+              >
+                <PanelLeftOpen className="size-5" />
+              </button>
+              <Link href="/" className="px-2 text-lg font-extrabold">
+                <KikuWordmark />
+              </Link>
+            </div>,
+            barSlot,
+          )}
       </div>
       {/* Pinned to the window on wide screens (fixed, not sticky: Safari on iPad moved a sticky one while scrolling). */}
       <div className={`drawer-side z-40 lg:fixed lg:bottom-0 lg:left-0 lg:h-auto lg:w-64 lg:overscroll-contain ${showBanner ? "lg:top-8" : "lg:top-0"}`}>

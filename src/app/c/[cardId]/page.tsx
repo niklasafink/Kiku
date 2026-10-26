@@ -22,8 +22,8 @@ import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
 import { folderOptions } from "@/lib/tree";
 import type { Attempt, Card, Folder } from "@/lib/types";
 
-/** Pause after the last keystroke before the text is stored. */
-const AUTOSAVE_DELAY = 600;
+/** Pause after the last keystroke or stroke before the text is stored: short, so a reload loses nothing. */
+const AUTOSAVE_DELAY = 100;
 
 // Preview or editing, for both sides of the card at once. Kept outside the page, so it stays
 // the way it was chosen when the arrows move on to the next card.

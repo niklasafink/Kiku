@@ -661,8 +661,8 @@ export function InkToolbar({
   canClear: boolean;
   onClear: () => void;
   clearLabel?: string;
-  /** Shows the label next to the bin, not only as its tooltip. */
-  clearText?: boolean;
+  /** A short word shown next to the bin; the label stays its tooltip. */
+  clearText?: string;
 }) {
   const iconButton = (active = false) => `btn btn-sm btn-square ${active ? "btn-primary" : "btn-ghost"}`;
   return (
@@ -714,7 +714,7 @@ export function InkToolbar({
           title={clearLabel}
         >
           <Trash2 className="size-4" />
-          {clearText && clearLabel}
+          {clearText}
         </button>
       )}
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
 import { ArrowLeft, ArrowRight, BookOpen, Check, ClipboardCheck, ClipboardList, CloudOff, Eye, EyeOff, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, Upload, X } from "lucide-react";
 import { useAccount } from "@/components/Account";
 import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
@@ -10,6 +10,7 @@ import { NormReport } from "@/components/NormReport";
 import { PdfViewer } from "@/components/PdfViewer";
 import { Recorder } from "@/components/Recorder";
 import { RichText } from "@/components/RichText";
+import { BarSlot } from "@/components/AppShell";
 import { DocWorkspace, SideView } from "@/components/StudyPanes";
 import { ScoreBadge, Trend, scoreTone } from "@/components/score";
 import { LiveStar } from "@/components/Tags";
@@ -17,7 +18,7 @@ import { inDays } from "@/lib/format";
 import { hasInk, recognizeInk } from "@/lib/ink";
 import { canSpeak, speak, stopSpeaking } from "@/lib/speak";
 import { isOffline } from "@/lib/pendingGrades";
-import { addAttempt, attemptsForCard, clearSession, latestAttempt, queuePendingAnswer, saveSession, updateCard } from "@/lib/repo";
+import { addAttempt, attemptsForCard, clearSession, latestAttempt, queuePendingAnswer, saveSession, saveSessionFiles, updateCard } from "@/lib/repo";
 import { MaterialError, readMaterial } from "@/lib/material";
 import { markNorms } from "@/lib/norms";
 import { isPdf } from "@/lib/pdfFiles";
@@ -56,8 +57,6 @@ function storedMode(): AnswerMode {
 
 const inputModeOf = (state: CardState): InputMode => (state.usedPen || hasInk(state.ink) ? "pen" : state.usedVoice ? "voice" : "text");
 
-/** Delay before a changed session is written; handwriting changes it with every stroke. */
-const SAVE_DELAY = 400;
 /** Once this few gradings are left in the month, the number is shown after every answer. */
 const SHOW_REMAINING_BELOW = 25;
 
@@ -103,7 +102,7 @@ export function StudySession({
   backHref: string;
   sessionKey?: string;
   /** Progress of an earlier, unfinished run over the same cards. */
-  initial?: { index: number; states: Record<string, CardState> };
+  initial?: { index: number; states: Record<string, CardState>; files?: Record<string, File> };
   exam?: boolean;
 }) {
   const [cards, setCards] = useState(initialCards);
@@ -126,12 +125,13 @@ export function StudySession({
   const [handsFree, setHandsFree] = useState(false);
   const [listen, setListen] = useState(0);
   const [mode, setMode] = useState<AnswerMode>(storedMode);
-  // A PDF or photo of a handwritten solution, shown next to its text; only kept while the session is open.
-  const [answerFiles, setAnswerFiles] = useState<Record<string, File>>({});
+  // A PDF or photo of a handwritten solution, shown next to its text; stored with the session.
+  const [answerFiles, setAnswerFiles] = useState<Record<string, File>>(initial?.files ?? {});
   const [reading, setReading] = useState<{ cardId: string; label: string } | null>(null);
   // Gradings left in the month, as the server reported it with the last answer.
   const [remaining, setRemaining] = useState<{ remaining: number; limit: number } | null>(null);
   const account = useAccount();
+  const barSlot = useContext(BarSlot);
   const folders = useFolders();
   // Free accounts dictate with the browser's speech recognition; the server only transcribes for paid ones.
   const browserDictation = account.mode === "server" && account.user?.plan === "free";
@@ -151,17 +151,21 @@ export function StudySession({
   }
 
   // A session is worth keeping once something happened in it and until the summary is reached;
-  // an exam also while it waits to be handed in.
+  // an exam also while it waits to be handed in. It is written with every change (every stroke,
+  // every letter), so reloading the page or closing the tab loses nothing.
   useEffect(() => {
     if (!sessionKey) return;
     const started =
       index > 0 || Object.values(states).some((s) => s.attempt || s.revealed || s.pending || s.answer.trim() || hasInk(s.ink));
     if (started && (index < cards.length || (exam && !handedIn))) {
-      const timer = setTimeout(() => void saveSession({ key: sessionKey, cardIds: cards.map((c) => c.id), index, states }), SAVE_DELAY);
-      return () => clearTimeout(timer);
+      void saveSession({ key: sessionKey, cardIds: cards.map((c) => c.id), index, states });
+    } else {
+      void clearSession(sessionKey);
     }
-    void clearSession(sessionKey);
   }, [sessionKey, cards, index, states, exam, handedIn]);
+  useEffect(() => {
+    if (sessionKey && Object.keys(answerFiles).length > 0) void saveSessionFiles(sessionKey, answerFiles);
+  }, [sessionKey, answerFiles]);
 
   // Arrow keys move between cards unless the cursor is in a text field.
   useEffect(() => {
@@ -596,6 +600,8 @@ export function StudySession({
   // One row from tablets up; on phones the bar wraps, so the main button is never pushed out of the screen.
   const bar = (
     <div className="flex flex-wrap items-center gap-1.5 py-0.5 sm:flex-nowrap sm:overflow-x-auto sm:[scrollbar-width:none]">
+      {/* With the sidebar folded away, its button and the logo come in here (see BarSlot). */}
+      <div ref={barSlot} className="contents" />
       <Link href={backHref} className={`${iconButton} btn-ghost`} title="Lernen abbrechen und zurück" aria-label="Lernen abbrechen">
         <X className="size-4" />
       </Link>

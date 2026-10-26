@@ -59,7 +59,7 @@ export async function deleteFolderRecursive(id: string): Promise<Deleted> {
     await db.attempts.bulkDelete(attempts.map((attempt) => attempt.id));
     await db.cards.bulkDelete(cardIds);
     await db.folders.bulkDelete(folderIds);
-    await db.sessions.bulkDelete(folderIds.flatMap((f) => STUDY_MODES.map((mode) => sessionKey(f, mode))));
+    await db.sessions.bulkDelete(folderIds.flatMap((f) => STUDY_MODES.flatMap((mode) => [sessionKey(f, mode), filesKey(sessionKey(f, mode))])));
     return { folders: folders.filter((folder) => folder !== undefined), cards, attempts };
   });
 }
@@ -229,16 +229,31 @@ export function sessionKey(folderId: string, mode: StudyMode): string {
   return `f:${folderId}:${mode}`;
 }
 
+/** Key of the stored session for practising one card, or the cards of a tag or of today outside a folder. */
+export const cardSessionKey = (cardId: string) => `c:${cardId}`;
+export const learnSessionKey = (tag: string | null, folderId: string | null) => `l:${tag ?? "today"}:${folderId ?? ""}`;
+
+/**
+ * The answer files of a session are kept in a row of their own: the session is written with every
+ * letter and stroke, the files only when one is added.
+ */
+const filesKey = (key: string) => `${key}#files`;
+
 export async function loadSession(key: string): Promise<SavedSession | undefined> {
-  return db.sessions.get(key);
+  const [session, files] = await db.sessions.bulkGet([key, filesKey(key)]);
+  return session && { ...session, files: files?.files };
 }
 
-export async function saveSession(session: Omit<SavedSession, "updatedAt">): Promise<void> {
+export async function saveSession(session: Omit<SavedSession, "updatedAt" | "files">): Promise<void> {
   await db.sessions.put({ ...session, updatedAt: Date.now() });
 }
 
+export async function saveSessionFiles(key: string, files: Record<string, File>): Promise<void> {
+  await db.sessions.put({ key: filesKey(key), cardIds: [], index: 0, states: {}, files, updatedAt: Date.now() });
+}
+
 export async function clearSession(key: string): Promise<void> {
-  await db.sessions.delete(key);
+  await db.sessions.bulkDelete([key, filesKey(key)]);
 }
 
 /** Keeps an answer given without a network until it can be graded. */

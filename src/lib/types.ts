@@ -84,6 +84,8 @@ export interface SavedSession {
   cardIds: string[];
   index: number;
   states: Record<string, StudyCardState>;
+  /** PDFs or photos uploaded as answers, by card. */
+  files?: Record<string, File>;
   updatedAt: number;
 }
 

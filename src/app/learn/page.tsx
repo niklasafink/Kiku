@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { StudySession } from "@/components/StudySession";
 import { useAllCards, useFolders, useSchedules } from "@/lib/hooks";
+import { learnSessionKey, loadSession } from "@/lib/repo";
 import { useNewPerDay } from "@/lib/settings";
 import { planToday } from "@/lib/srs";
 import { descendantIds } from "@/lib/tree";
-import type { Card } from "@/lib/types";
+import type { Card, SavedSession } from "@/lib/types";
 
 const SKELETON = <div className="skeleton h-64 w-full rounded-box" />;
 
@@ -25,10 +26,32 @@ function Session({ tag, folderId }: { tag: string | null; folderId: string | nul
   // Fixed on first render: results coming in must not change the running session.
   const [cards, setCards] = useState<Card[] | null>(null);
   const backHref = folderId ? `/f/${folderId}` : tag ? "/search" : "/";
+  // The run that was going on when the page was left or reloaded; it goes on where it was.
+  const key = learnSessionKey(tag, folderId);
+  const [saved, setSaved] = useState<SavedSession | null | undefined>(undefined);
+  const [initial, setInitial] = useState<{ index: number; states: SavedSession["states"]; files?: SavedSession["files"] }>();
+  useEffect(() => {
+    let active = true;
+    void loadSession(key).then((session) => active && setSaved(session ?? null));
+    return () => {
+      active = false;
+    };
+  }, [key]);
 
-  if (!folders || !allCards || !schedules) return SKELETON;
+  if (!folders || !allCards || !schedules || saved === undefined) return SKELETON;
   if (!cards) {
-    if (tag) {
+    const byId = new Map(allCards.map((c) => [c.id, c]));
+    const savedCards = saved ? saved.cardIds.flatMap((id) => byId.get(id) ?? []) : [];
+    // Today's plan from another day is not taken up again; a tag's run is.
+    const current = saved && savedCards.length > 0 && (tag || new Date(saved.updatedAt).toDateString() === new Date(now).toDateString());
+    if (current) {
+      setInitial({
+        index: Math.max(0, savedCards.findIndex((c) => c.id === saved.cardIds[saved.index])),
+        states: saved.states,
+        files: saved.files,
+      });
+      setCards(savedCards);
+    } else if (tag) {
       const inFolder = folderId ? new Set(descendantIds(folders, folderId)) : null;
       setCards(
         allCards
@@ -53,7 +76,7 @@ function Session({ tag, folderId }: { tag: string | null; folderId: string | nul
     );
   }
 
-  return <StudySession cards={cards} backHref={backHref} />;
+  return <StudySession cards={cards} backHref={backHref} sessionKey={key} initial={initial} />;
 }
 
 function Learn() {

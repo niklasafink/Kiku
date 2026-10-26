@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { PdfViewer } from "@/components/PdfViewer";
+import { PdfViewer, ToolSlot } from "@/components/PdfViewer";
 import { RichText } from "@/components/RichText";
 import { pdfRefs } from "@/lib/richText";
 import { useMarkings } from "@/lib/useInk";
@@ -17,27 +17,44 @@ export interface PaneTab {
 /**
  * One side of the study window with tabs on top. Every tab stays mounted and the inactive ones are
  * only hidden, so what runs inside keeps running: a recording goes on while the other tab is looked at.
+ * Left of the tabs a PDF in the tab puts its tools for marking.
  */
 function Pane({ tabs, active, onChange, name }: { tabs: PaneTab[]; active: string; onChange: (id: string) => void; name: string }) {
+  const [slots, setSlots] = useState<Record<string, HTMLElement | null>>({});
   return (
     <section className="flex min-h-0 flex-col gap-2" aria-label={name}>
-      <div role="tablist" aria-label={name} className="join self-start">
-        {tabs.map(({ id, label, Icon }) => (
-          <button
-            key={id}
-            role="tab"
-            aria-selected={active === id}
-            className={`btn btn-sm join-item ${active === id ? "btn-primary" : "bg-base-100"}`}
-            onClick={() => onChange(id)}
-          >
-            <Icon className="size-4" aria-hidden /> {label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="min-w-0 flex-1">
+          {tabs.map(({ id }) => (
+            <div
+              key={id}
+              ref={(element) => {
+                setSlots((was) => (was[id] === element ? was : { ...was, [id]: element }));
+                // With a cleanup the element is not handed over again as null on every render.
+                return () => {};
+              }}
+              className={active === id ? "" : "hidden"}
+            />
+          ))}
+        </div>
+        <div role="tablist" aria-label={name} className="join ml-auto shrink-0">
+          {tabs.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={active === id}
+              className={`btn btn-sm join-item ${active === id ? "btn-primary" : "bg-base-100"}`}
+              onClick={() => onChange(id)}
+            >
+              <Icon className="size-4" aria-hidden /> {label}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="relative min-h-0 flex-1">
         {tabs.map(({ id, node }) => (
           <div key={id} role="tabpanel" className={`flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain ${active === id ? "" : "hidden"}`}>
-            {node}
+            <ToolSlot.Provider value={slots[id] ?? null}>{node}</ToolSlot.Provider>
           </div>
         ))}
       </div>
