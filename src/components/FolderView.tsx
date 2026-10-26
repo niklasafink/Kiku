@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CalendarClock,
   CalendarDays,
@@ -138,12 +138,21 @@ function IconAction({ label, href, onClick, children }: { label: string; href?: 
 /** A button that starts a session: it opens a choice of the order, as the cards come or shuffled. */
 function StartMenu({ href, className, title, children }: { href: string; className: string; title?: string; children: ReactNode }) {
   const join = href.includes("?") ? "&" : "?";
+  // A <details>, not a focused button: Safari on iPad does not focus a tapped button, so that menu never opened.
+  const menu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    function close(event: PointerEvent) {
+      if (menu.current?.open && !menu.current.contains(event.target as Node)) menu.current.open = false;
+    }
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, []);
   return (
-    <div className="dropdown">
-      <button tabIndex={0} className={className} title={title} aria-haspopup="menu">
+    <details ref={menu} className="dropdown">
+      <summary className={`${className} list-none [&::-webkit-details-marker]:hidden`} title={title} aria-haspopup="menu">
         {children}
-      </button>
-      <ul tabIndex={-1} className="dropdown-content menu z-10 mt-1 w-52 rounded-box border-2 border-base-300 bg-base-100 p-2 font-semibold">
+      </summary>
+      <ul className="dropdown-content menu z-10 mt-1 w-52 rounded-box border-2 border-base-300 bg-base-100 p-2 font-semibold">
         <li>
           <Link href={href}>
             <ListOrdered className="size-4" /> Der Reihe nach
@@ -155,7 +164,7 @@ function StartMenu({ href, className, title, children }: { href: string; classNa
           </Link>
         </li>
       </ul>
-    </div>
+    </details>
   );
 }
 
