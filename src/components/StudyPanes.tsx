@@ -4,8 +4,8 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { PdfViewer } from "@/components/PdfViewer";
 import { RichText } from "@/components/RichText";
-import { inkRef, pdfRefs } from "@/lib/richText";
-import { useInk } from "@/lib/useInk";
+import { pdfRefs } from "@/lib/richText";
+import { useMarkings } from "@/lib/useInk";
 
 export interface PaneTab {
   id: string;
@@ -90,12 +90,17 @@ export function DocWorkspace({
   );
 }
 
-/** A card side that has PDFs: the reader (with a choice if there are several); otherwise the text. */
-export function SideView({ text, empty }: { text: string; empty?: string }) {
+const KEEP = () => {};
+
+/**
+ * A card side that has PDFs: the reader (with a choice if there are several); otherwise the text.
+ * With `onChange` the PDFs can be marked while practising; the card then gets the text naming the markings.
+ */
+export function SideView({ text, empty, onChange }: { text: string; empty?: string; onChange?: (text: string) => void }) {
   const pdfs = pdfRefs(text);
   const [chosen, setChosen] = useState(0);
-  // What was marked on the PDFs when the card was edited: shown over the pages.
-  const ink = useInk(inkRef(text));
+  // What was marked on the PDFs, when the card was edited or while practising: shown over the pages.
+  const { markings, mark } = useMarkings(text, onChange ?? KEEP);
   if (pdfs.length === 0) {
     return text.trim() ? (
       <div className="tile p-4">
@@ -117,7 +122,14 @@ export function SideView({ text, empty }: { text: string; empty?: string }) {
           ))}
         </div>
       )}
-      <PdfViewer key={pdf.id} source={{ id: pdf.id }} name={pdf.name} className="min-h-0 flex-1" ink={ink[pdf.id]} />
+      <PdfViewer
+        key={pdf.id}
+        source={{ id: pdf.id }}
+        name={pdf.name}
+        className="min-h-0 flex-1"
+        ink={markings[pdf.id]}
+        onInk={onChange ? (next) => mark(pdf.id, next) : undefined}
+      />
     </div>
   );
 }

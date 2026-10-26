@@ -17,7 +17,7 @@ import { inDays } from "@/lib/format";
 import { hasInk, recognizeInk } from "@/lib/ink";
 import { canSpeak, speak, stopSpeaking } from "@/lib/speak";
 import { isOffline } from "@/lib/pendingGrades";
-import { addAttempt, attemptsForCard, clearSession, latestAttempt, queuePendingAnswer, saveSession } from "@/lib/repo";
+import { addAttempt, attemptsForCard, clearSession, latestAttempt, queuePendingAnswer, saveSession, updateCard } from "@/lib/repo";
 import { MaterialError, readMaterial } from "@/lib/material";
 import { markNorms } from "@/lib/norms";
 import { isPdf } from "@/lib/pdfFiles";
@@ -186,6 +186,12 @@ export function StudySession({
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [peeking]);
+
+  /** Markings made on a PDF while practising stay on the card, as if it had been edited. */
+  function saveSide(cardId: string, side: "question" | "solution", text: string) {
+    setCards((all) => all.map((c) => (c.id === cardId ? { ...c, [side]: text } : c)));
+    void updateCard(cardId, { [side]: text });
+  }
 
   function chooseMode(next: AnswerMode) {
     setMode(next);
@@ -904,8 +910,8 @@ export function StudySession({
         <DocWorkspace
           resultKey={`${card.id}:${attempt?.id ?? ""}`}
           left={[
-            { id: "task", label: "Aufgabe", Icon: ClipboardList, node: <SideView text={card.question} /> },
-            { id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView text={card.solution} /> },
+            { id: "task", label: "Aufgabe", Icon: ClipboardList, node: <SideView key={card.id} text={card.question} onChange={(text) => saveSide(card.id, "question", text)} /> },
+            { id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView key={card.id} text={card.solution} onChange={(text) => saveSide(card.id, "solution", text)} /> },
           ]}
           right={[
             {
@@ -919,7 +925,7 @@ export function StudySession({
                 </>
               ),
             },
-            { id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView text={card.solution} /> },
+            { id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView key={card.id} text={card.solution} onChange={(text) => saveSide(card.id, "solution", text)} /> },
           ]}
         />
       </div>

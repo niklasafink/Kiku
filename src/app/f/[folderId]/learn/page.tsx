@@ -23,7 +23,18 @@ const EMPTY: Record<StudyMode, string> = {
   exam: "In diesem Ordner gibt es noch keine Karten.",
 };
 
-function FolderSession({ folderId, mode, autoResume }: { folderId: string; mode: StudyMode; autoResume: boolean }) {
+function FolderSession({
+  folderId,
+  mode,
+  random,
+  autoResume,
+}: {
+  folderId: string;
+  mode: StudyMode;
+  /** The cards in a random order instead of the order they were made in. */
+  random: boolean;
+  autoResume: boolean;
+}) {
   // Exam simulation: a random draw, graded at the end. Stored like the others until it is handed in.
   const exam = mode === "exam";
   const folders = useFolders();
@@ -101,7 +112,8 @@ function FolderSession({ folderId, mode, autoResume }: { folderId: string; mode:
       const today = planToday(inFolder, schedules, folders, now, newPerDay);
       setFresh([...today.due, ...today.fresh]);
     } else {
-      setFresh(mode === "weak" ? inFolder.filter((c) => isWeak(latest.get(c.id))) : inFolder);
+      const chosen = mode === "weak" ? inFolder.filter((c) => isWeak(latest.get(c.id))) : inFolder;
+      setFresh(random ? shuffled(chosen) : chosen);
     }
     return SKELETON;
   }
@@ -125,7 +137,16 @@ function FolderLearn() {
   const params = useSearchParams();
   const requested = params.get("exam") === "1" ? "exam" : params.get("mode");
   const mode: StudyMode = requested === "weak" || requested === "due" || requested === "exam" ? requested : "all";
-  return <FolderSession key={`${folderId}-${mode}`} folderId={folderId} mode={mode} autoResume={params.get("resume") === "1"} />;
+  const random = params.get("order") === "random";
+  return (
+    <FolderSession
+      key={`${folderId}-${mode}-${random}`}
+      folderId={folderId}
+      mode={mode}
+      random={random}
+      autoResume={params.get("resume") === "1"}
+    />
+  );
 }
 
 export default function FolderLearnPage() {

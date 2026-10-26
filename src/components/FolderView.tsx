@@ -17,6 +17,7 @@ import {
   GraduationCap,
   History,
   ListChecks,
+  ListOrdered,
   MessagesSquare,
   Mic,
   MoreHorizontal,
@@ -25,6 +26,7 @@ import {
   Plus,
   ScanEye,
   Share2,
+  Shuffle,
   Sparkles,
   Tag as TagIcon,
   Target,
@@ -129,6 +131,30 @@ function IconAction({ label, href, onClick, children }: { label: string; href?: 
           {children}
         </button>
       )}
+    </div>
+  );
+}
+
+/** A button that starts a session: it opens a choice of the order, as the cards come or shuffled. */
+function StartMenu({ href, className, title, children }: { href: string; className: string; title?: string; children: ReactNode }) {
+  const join = href.includes("?") ? "&" : "?";
+  return (
+    <div className="dropdown">
+      <button tabIndex={0} className={className} title={title} aria-haspopup="menu">
+        {children}
+      </button>
+      <ul tabIndex={-1} className="dropdown-content menu z-10 mt-1 w-52 rounded-box border-2 border-base-300 bg-base-100 p-2 font-semibold">
+        <li>
+          <Link href={href}>
+            <ListOrdered className="size-4" /> Der Reihe nach
+          </Link>
+        </li>
+        <li>
+          <Link href={`${href}${join}order=random`}>
+            <Shuffle className="size-4" /> Zufällig
+          </Link>
+        </li>
+      </ul>
     </div>
   );
 }
@@ -300,7 +326,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
             </Link>
           )}
           {folder && scope.length > 0 && (
-            <Link href={`/f/${folder.id}/learn`} className={`btn btn-sm btn-chunky ${todayCount > 0 ? "bg-base-100" : "btn-primary"}`}>
+            <StartMenu href={`/f/${folder.id}/learn`} className={`btn btn-sm btn-chunky ${todayCount > 0 ? "bg-base-100" : "btn-primary"}`}>
               <Play className="size-4" fill="currentColor" />
               {todayCount > 0 ? "Alle lernen" : "Lernen"}
               <span
@@ -308,7 +334,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
               >
                 {scope.length}
               </span>
-            </Link>
+            </StartMenu>
           )}
           {folder && savedSession && (
             <Link
@@ -324,7 +350,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
             </Link>
           )}
           {folder && weakCount > 0 && weakCount < scope.length && (
-            <Link
+            <StartMenu
               href={`/f/${folder.id}/learn?mode=weak`}
               className="btn btn-sm btn-chunky bg-base-100"
               title="Nur neue Karten und Karten unter 80 %"
@@ -332,7 +358,7 @@ export function FolderView({ folderId }: { folderId: string | null }) {
               <Target className="size-4" />
               Schwache üben
               <span className="badge badge-sm badge-ghost">{weakCount}</span>
-            </Link>
+            </StartMenu>
           )}
           {folder && scope.length > 1 && (
             <IconAction label="Prüfung simulieren" href={`/f/${folder.id}/learn?mode=exam`}>

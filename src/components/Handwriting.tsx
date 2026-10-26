@@ -645,6 +645,7 @@ export function InkToolbar({
   canClear,
   onClear,
   clearLabel = "Blatt leeren",
+  clearText,
 }: {
   tool: Tool;
   onTool: (tool: Tool) => void;
@@ -660,6 +661,8 @@ export function InkToolbar({
   canClear: boolean;
   onClear: () => void;
   clearLabel?: string;
+  /** Shows the label next to the bin, not only as its tooltip. */
+  clearText?: boolean;
 }) {
   const iconButton = (active = false) => `btn btn-sm btn-square ${active ? "btn-primary" : "btn-ghost"}`;
   return (
@@ -702,8 +705,16 @@ export function InkToolbar({
           <Trash2 className="size-4" /> Auswahl löschen
         </button>
       ) : (
-        <button type="button" className={`${iconButton()} ml-auto`} onClick={onClear} disabled={disabled || !canClear} aria-label={clearLabel} title={clearLabel}>
+        <button
+          type="button"
+          className={clearText ? "btn btn-ghost btn-sm ml-auto" : `${iconButton()} ml-auto`}
+          onClick={onClear}
+          disabled={disabled || !canClear}
+          aria-label={clearLabel}
+          title={clearLabel}
+        >
           <Trash2 className="size-4" />
+          {clearText && clearLabel}
         </button>
       )}
     </div>

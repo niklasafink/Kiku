@@ -598,7 +598,8 @@ export function PdfViewer({
               inkRef.current = {};
               onInk({});
             }}
-            clearLabel="Alle Markierungen entfernen"
+            clearLabel="Anmerkungen löschen"
+            clearText
           />
         </div>
       )}

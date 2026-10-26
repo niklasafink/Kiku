@@ -17,8 +17,7 @@ import { CardImage, RichText } from "@/components/RichText";
 import { ImageError, saveImage } from "@/lib/images";
 import { parseTable } from "@/lib/importCards";
 import { isPdf, PdfError, pdfText, savePdf } from "@/lib/pdfFiles";
-import { dropInk, hasMarkings, storeInk, type PageInk, type PdfInk } from "@/lib/pdfInk";
-import { useInk } from "@/lib/useInk";
+import { useMarkings } from "@/lib/useInk";
 import { imageIds, imageMarkup, joinPdfs, splitPdfs, toMarkdownTable } from "@/lib/richText";
 import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
 
@@ -77,44 +76,11 @@ export function RichEditor(props: EditorProps) {
   });
 
   // What was marked on the PDFs. Changes are kept in a new file a moment after the last stroke.
-  const stored = useInk(inkId);
-  const [edited, setEdited] = useState<PdfInk | null>(null);
-  const markings = edited ?? stored;
-  const pending = useRef<PdfInk | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  // Files that were replaced; one is removed when the next one replaces it, by when the card text no longer names it.
-  const replaced = useRef<string[]>([]);
-  const flushInk = useRef(() => {});
-  useEffect(() => {
-    flushInk.current = () => {
-      clearTimeout(timer.current);
-      const next = pending.current;
-      if (!next) return;
-      pending.current = null;
-      const { props: current, body: text, pdfs: attached, inkId: was } = latest.current;
-      const id = hasMarkings(next) ? storeInk(next) : null;
-      if (was) replaced.current.push(was);
-      while (replaced.current.length > 1) void dropInk(replaced.current.shift()!);
-      // The next change builds on this one, not on the text from before.
-      latest.current = { ...latest.current, inkId: id };
-      current.onChange(joinPdfs(text, attached, id));
-    };
+  const { markings, mark } = useMarkings(props.value, (text) => {
+    // The next file attached builds on this text, not on the one from before.
+    latest.current = { ...latest.current, inkId: splitPdfs(text).ink };
+    latest.current.props.onChange(text);
   });
-  useEffect(() => {
-    const leave = () => flushInk.current();
-    window.addEventListener("pagehide", leave);
-    return () => {
-      window.removeEventListener("pagehide", leave);
-      leave();
-    };
-  }, []);
-  function mark(pdf: string, next: PageInk) {
-    const all = { ...markings, [pdf]: next };
-    setEdited(all);
-    pending.current = all;
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => flushInk.current(), 500);
-  }
 
   async function attach(files: File[]) {
     const found = files.filter(isPdf);
