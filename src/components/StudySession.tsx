@@ -22,8 +22,9 @@ import { isOffline } from "@/lib/pendingGrades";
 import { addAttempt, attemptsForCard, clearSession, latestAttempt, queuePendingAnswer, saveSession, saveSessionFiles, updateCard } from "@/lib/repo";
 import { MaterialError, readMaterial } from "@/lib/material";
 import { markNorms } from "@/lib/norms";
-import { isPdf } from "@/lib/pdfFiles";
-import { pdfRefs, toPlainText } from "@/lib/richText";
+import { isPdf, storedPdfText } from "@/lib/pdfFiles";
+import { joinPdfs, pdfRefs, splitPdfs, toPlainText } from "@/lib/richText";
+import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
 import { useFolders } from "@/lib/hooks";
 import { pathTo } from "@/lib/tree";
 import { daysUntil, scheduleOf } from "@/lib/srs";
@@ -204,6 +205,23 @@ export function StudySession({
     void updateCard(cardId, { [side]: text });
   }
 
+  /**
+   * A solution that is only a PDF gets its text now: cards made while reading PDFs failed on a
+   * device have none, and without it there is nothing to compare with. The text is kept on the card.
+   */
+  async function withSolutionText(target: Card): Promise<Card> {
+    if (toPlainText(target.solution)) return target;
+    const { body, pdfs, ink } = splitPdfs(target.solution);
+    if (pdfs.length === 0) return target;
+    const texts: string[] = [];
+    for (const pdf of pdfs) texts.push(await storedPdfText(pdf.id, pdf.name));
+    const text = texts.filter(Boolean).join("\n\n").slice(0, MAX_CARD_TEXT - 200 * (pdfs.length + 1));
+    if (!text) return target;
+    const solution = joinPdfs(body.trim() ? `${body.trimEnd()}\n\n${text}` : text, pdfs, ink);
+    saveSide(target.id, "solution", solution);
+    return { ...target, solution };
+  }
+
   function chooseMode(next: AnswerMode) {
     setMode(next);
     try {
@@ -380,7 +398,7 @@ export function StudySession({
   /** `spoken` is an answer that was just transcribed and is not in the state yet (hands-free). */
   async function grade(target: Card, spoken?: string) {
     if (grading || !(spoken || states[target.id]?.answer.trim() || hasInk(states[target.id]?.ink))) return;
-    if (!toPlainText(target.solution)) {
+    if (!toPlainText(target.solution) && pdfRefs(target.solution).length === 0) {
       setError("Die Lösung dieser Karte besteht nur aus Bildern und lässt sich nicht automatisch abgleichen. Nutze „Lösung zeigen“.");
       return;
     }
@@ -389,6 +407,11 @@ export function StudySession({
     const controller = new AbortController();
     abort.current = controller;
     try {
+      target = await withSolutionText(target);
+      if (!toPlainText(target.solution)) {
+        setError("Aus der Lösungs-PDF ließ sich kein Text lesen, auch nicht mit Texterkennung. Nutze „Lösung zeigen“.");
+        return;
+      }
       const { answer, mode: inputMode } = spoken ? { answer: spoken, mode: "voice" as const } : await answerOf(target, controller.signal);
       await evaluate(target, answer, inputMode, controller.signal);
     } catch (e) {
@@ -417,7 +440,9 @@ export function StudySession({
    * a network the answers are queued and the result comes once there is one.
    */
   async function handIn() {
-    const open = cards.filter((c) => isAnswered(c) && !states[c.id]?.attempt && !states[c.id]?.pending && toPlainText(c.solution));
+    const open = cards.filter(
+      (c) => isAnswered(c) && !states[c.id]?.attempt && !states[c.id]?.pending && (toPlainText(c.solution) || pdfRefs(c.solution).length > 0),
+    );
     setError(null);
     setHandingIn(true);
     const controller = new AbortController();
@@ -427,8 +452,11 @@ export function StudySession({
     let next = 0;
     const worker = async () => {
       while (next < open.length && failed === null && !controller.signal.aborted) {
-        const target = open[next++];
+        let target = open[next++];
         try {
+          target = await withSolutionText(target);
+          // A PDF without any readable text: the card stays open, like one whose solution is only pictures.
+          if (!toPlainText(target.solution)) continue;
           const { answer, mode: inputMode } = await answerOf(target, controller.signal);
           await evaluate(target, answer, inputMode, controller.signal);
         } catch (e) {

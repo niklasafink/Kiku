@@ -39,6 +39,7 @@
     "perfect-freehand": "^1.2.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "tesseract.js": "7.0.0",
     "ts-fsrs": "^5.4.2",
     "zod": "^4.6.5"
   },

@@ -12,6 +12,11 @@ export type ReadKind = "document" | "handwriting";
 
 export interface ReadOptions {
   kind?: ReadKind;
+  /**
+   * Who reads pages without a text layer: the AI (counted against the daily limit, also reads
+   * handwriting) or Tesseract in the browser (free, for printed pages such as a model solution).
+   */
+  ocr?: "ai" | "free";
   /** Less text than this counts as nothing found. An answer may be short; material is not. */
   minChars?: number;
 }
@@ -38,7 +43,28 @@ async function readPicture(image: Blob, kind: ReadKind): Promise<string> {
   return String(data?.text ?? "").trim();
 }
 
-async function readPdf(data: ArrayBuffer, kind: ReadKind, onProgress?: (done: number, total: number) => void): Promise<string[]> {
+type Recognizer = { recognize: (image: HTMLCanvasElement) => Promise<{ data: { text: string } }> };
+let tesseract: Promise<Recognizer> | undefined;
+
+/**
+ * Reads printed text on a picture in the browser, without the AI. Tesseract and its German data
+ * (a few MB from the jsDelivr CDN) are loaded on first use and stay for the visit.
+ */
+async function readPrinted(canvas: HTMLCanvasElement): Promise<string> {
+  tesseract ??= import("tesseract.js").then(({ createWorker }) => createWorker("deu"));
+  tesseract.catch(() => {
+    tesseract = undefined;
+  });
+  const { data } = await (await tesseract).recognize(canvas);
+  return data.text.trim();
+}
+
+async function readPdf(
+  data: ArrayBuffer,
+  kind: ReadKind,
+  ocr: "ai" | "free",
+  onProgress?: (done: number, total: number) => void,
+): Promise<string[]> {
   const pdfjs = await loadPdfjs();
   const task = pdfjs.getDocument({ data, ...DOCUMENT_OPTIONS });
   const document = await task.promise;
@@ -62,10 +88,17 @@ async function readPdf(data: ArrayBuffer, kind: ReadKind, onProgress?: (done: nu
         canvas.width = Math.ceil(viewport.width);
         canvas.height = Math.ceil(viewport.height);
         await page.render({ canvas, viewport }).promise;
-        const image = await toJpeg(canvas);
-        if (image) {
-          scanned++;
-          const read = await readPicture(image, kind);
+        scanned++;
+        if (ocr === "free") {
+          // A page that cannot be read keeps what pdf.js found; the other pages still count.
+          const read = await readPrinted(canvas).catch((error) => {
+            console.error(error);
+            return "";
+          });
+          if (read.length > text.length) text = read;
+        } else {
+          const image = await toJpeg(canvas);
+          const read = image ? await readPicture(image, kind) : "";
           if (read.length > text.length) text = read;
         }
       }
@@ -105,12 +138,12 @@ export const MATERIAL_ACCEPT = ".pdf,.pptx,.docx,.txt,.md,application/pdf,text/p
 export async function readMaterial(
   file: File,
   onProgress?: (done: number, total: number) => void,
-  { kind = "document", minChars = 80 }: ReadOptions = {},
+  { kind = "document", minChars = 80, ocr = "ai" }: ReadOptions = {},
 ): Promise<string[]> {
   const name = file.name.toLowerCase();
   let pages: string[];
   try {
-    if (name.endsWith(".pdf")) pages = await readPdf(await file.arrayBuffer(), kind, onProgress);
+    if (name.endsWith(".pdf")) pages = await readPdf(await file.arrayBuffer(), kind, ocr, onProgress);
     else if (name.endsWith(".pptx")) pages = await readPptx(await file.arrayBuffer());
     else if (name.endsWith(".docx")) pages = await readDocx(await file.arrayBuffer());
     else if (/\.(txt|md|markdown)$/.test(name) || file.type.startsWith("text/")) pages = (await file.text()).split(/\n\s*\n/);

@@ -32,17 +32,27 @@ export async function pdfBytes(id: string): Promise<ArrayBuffer | null> {
 }
 
 /**
- * The text of a PDF as card text, cut to what a card may hold. Scans are read by the AI.
- * Returns an empty text if nothing could be read; the PDF is still usable as a picture of the pages.
+ * The text of a PDF as card text, cut to what a card may hold. Scanned pages are read in the
+ * browser (free, no AI). Returns an empty text if nothing could be read; the PDF is still usable
+ * as a picture of the pages.
  */
 export async function pdfText(file: File, onProgress?: (done: number, total: number) => void): Promise<{ text: string; cut: boolean }> {
   try {
-    const pages = await readMaterial(file, onProgress);
+    // A short model solution is still a solution.
+    const pages = await readMaterial(file, onProgress, { ocr: "free", minChars: 1 });
     const text = pages.join("\n\n");
     // Room for the PDF marks and for what is already in the field.
     const room = MAX_CARD_TEXT - 2_000;
     return text.length > room ? { text: text.slice(0, room), cut: true } : { text, cut: false };
-  } catch {
+  } catch (error) {
+    console.error(error);
     return { text: "", cut: false };
   }
+}
+
+/** The text of a stored PDF, as pdfText reads it; empty if the PDF is missing or has no readable text. */
+export async function storedPdfText(id: string, name: string, onProgress?: (done: number, total: number) => void): Promise<string> {
+  const data = await pdfBytes(id);
+  if (!data) return "";
+  return (await pdfText(new File([data], name, { type: "application/pdf" }), onProgress)).text;
 }
