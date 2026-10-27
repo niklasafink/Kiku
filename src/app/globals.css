@@ -188,6 +188,28 @@ a.tile:active {
   outline-offset: 1px;
 }
 
+/* The same grading laid over the page of a PDF (see GradedPdf); the page is always white. */
+.grade-mark {
+  position: absolute;
+  border-radius: 2px;
+  mix-blend-mode: multiply;
+  cursor: pointer;
+}
+.grade-correct {
+  background: color-mix(in oklab, var(--color-success) 38%, transparent);
+}
+.grade-missing {
+  background: color-mix(in oklab, var(--color-error) 30%, transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in oklab, var(--color-error) 75%, transparent);
+}
+.grade-unsure {
+  background: oklch(0.55 0 0 / 0.28);
+}
+.grade-active {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
 @keyframes pop-in {
   from {
     opacity: 0;

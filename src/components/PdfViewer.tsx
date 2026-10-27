@@ -7,6 +7,7 @@ import { InkOverlay, InkSurface, InkToolbar, useInkHistory, type Tool } from "@/
 import type { Stroke } from "@/lib/ink";
 import { DOCUMENT_OPTIONS, loadPdfjs } from "@/lib/pdfjs";
 import { pdfBytes } from "@/lib/pdfFiles";
+import type { GradeMark } from "@/lib/pdfGrade";
 import { INK_PAGE_WIDTH, type PageInk } from "@/lib/pdfInk";
 
 type PdfDocument = import("pdfjs-dist/legacy/build/pdf.mjs").PDFDocumentProxy;
@@ -44,6 +45,12 @@ interface Marking {
   onSelection: (page: number, selection: { count: number; remove: () => void } | null) => void;
 }
 
+/** The grading laid over the pages, the same for every page. */
+interface Grading {
+  active: number | null;
+  onTap?: (segment: number) => void;
+}
+
 function Page({
   doc,
   number,
@@ -53,6 +60,8 @@ function Page({
   root,
   strokes,
   marking,
+  grades,
+  grading,
   report: debug,
 }: {
   doc: PdfDocument;
@@ -67,6 +76,9 @@ function Page({
   strokes: Stroke[];
   /** Present while the reader marks; otherwise the markings are only shown. */
   marking?: Marking;
+  /** Boxes of a graded solution on this page. */
+  grades: GradeMark[];
+  grading: Grading;
   /** Only with ?pdfdebug in the address: told what was drawn, to find out why a page stays empty. */
   report?: (message: string) => void;
 }) {
@@ -181,12 +193,27 @@ function Page({
           )}
         </div>
       )}
+      {/* Above the page, in shares of it, so the boxes stay in place at every zoom. */}
+      {grades.length > 0 && (
+        <div className="pointer-events-none absolute inset-0" aria-hidden>
+          {grades.map((mark, i) => (
+            <span
+              key={i}
+              className={`grade-mark grade-${mark.status} ${grading.active === mark.segment ? "grade-active" : ""} ${grading.onTap ? "pointer-events-auto" : ""}`}
+              style={{ left: `${mark.x * 100}%`, top: `${mark.y * 100}%`, width: `${mark.width * 100}%`, height: `${mark.height * 100}%` }}
+              onClick={grading.onTap ? () => grading.onTap!(mark.segment) : undefined}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 const NO_INK: PageInk = {};
 const NO_STROKES: Stroke[] = [];
+const NO_GRADES: Record<number, GradeMark[]> = {};
+const NO_MARKS: GradeMark[] = [];
 
 /**
  * Reads a PDF in the page: scrolling through all pages, zooming with the buttons, the keys
@@ -196,6 +223,8 @@ const NO_STROKES: Stroke[] = [];
  * With `onInk` the reader can also mark the pages: with the pen, the marker, a straight line (for
  * underlining), the eraser and the lasso, the tools of the handwritten answer. `ink` holds what was marked
  * and is shown either way.
+ *
+ * `grades` lays a graded solution over the pages (see GradedPdf); a tap on a box calls `onGrade`.
  */
 export function PdfViewer({
   source,
@@ -203,12 +232,18 @@ export function PdfViewer({
   className = "",
   ink = NO_INK,
   onInk,
+  grades = NO_GRADES,
+  activeGrade = null,
+  onGrade,
 }: {
   source: PdfSource;
   name?: string;
   className?: string;
   ink?: PageInk;
   onInk?: (next: PageInk) => void;
+  grades?: Record<number, GradeMark[]>;
+  activeGrade?: number | null;
+  onGrade?: (segment: number) => void;
 }) {
   const [doc, setDoc] = useState<PdfDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -270,6 +305,7 @@ export function PdfViewer({
     return () => channel.close();
   }, [debugOn]);
   const hasStrokes = Object.values(ink).some((strokes) => strokes.length > 0);
+  const grading = useMemo<Grading>(() => ({ active: activeGrade, onTap: onGrade }), [activeGrade, onGrade]);
 
   const key = "id" in source ? source.id : null;
   const file = "file" in source ? source.file : null;
@@ -654,6 +690,8 @@ export function PdfViewer({
                 root={scroller}
                 strokes={ink[i + 1] ?? NO_STROKES}
                 marking={marking}
+                grades={grades[i + 1] ?? NO_MARKS}
+                grading={grading}
                 report={report}
               />
             ))}

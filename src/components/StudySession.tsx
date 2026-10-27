@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
-import { ArrowLeft, ArrowRight, BookOpen, Check, ClipboardCheck, ClipboardList, CloudOff, Eye, EyeOff, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, Upload, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Check, ClipboardCheck, ClipboardList, CloudOff, Eye, EyeOff, FileCheck, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, Upload, X } from "lucide-react";
 import { useAccount } from "@/components/Account";
+import { GradedPdf, prefetchPdfText } from "@/components/GradedPdf";
 import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
 import { Handwriting } from "@/components/Handwriting";
 import { NormReport } from "@/components/NormReport";
@@ -166,6 +167,12 @@ export function StudySession({
   useEffect(() => {
     if (sessionKey && Object.keys(answerFiles).length > 0) void saveSessionFiles(sessionKey, answerFiles);
   }, [sessionKey, answerFiles]);
+
+  // The text of the solution PDFs is read while the card is answered, so the grading lies on them at once.
+  const solutionText = card?.solution ?? "";
+  useEffect(() => {
+    prefetchPdfText(pdfRefs(solutionText).map((pdf) => pdf.id));
+  }, [solutionText]);
 
   // Arrow keys move between cards unless the cursor is in a text field.
   useEffect(() => {
@@ -910,6 +917,22 @@ export function StudySession({
     ) : (
       inputBlock
     );
+    // The grading laid over the solution PDF comes first once there is a result.
+    const gradedPdf = attempt && pdfRefs(attempt.solutionSnapshot).length > 0 && (
+      <GradedPdf
+        solution={attempt.solutionSnapshot}
+        segments={attempt.segments}
+        className="h-full"
+        header={
+          <p className="flex flex-wrap items-center gap-2 text-sm">
+            <ScoreBadge score={attempt.score} />
+            <span className="font-bold">{praise(attempt.score)}</span>
+            {state.previousScore !== null && <Trend delta={attempt.score - state.previousScore} />}
+          </p>
+        }
+        fallback={gradedBlock}
+      />
+    );
     return (
       <div className="flex flex-col gap-2">
         {bar}
@@ -920,6 +943,7 @@ export function StudySession({
             { id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView key={card.id} text={card.solution} onChange={(text) => saveSide(card.id, "solution", text)} /> },
           ]}
           right={[
+            ...(gradedPdf ? [{ id: "graded", label: "Bewertung", Icon: FileCheck, node: gradedPdf }] : []),
             {
               id: "answer",
               label: attempt ? "Ergebnis" : "Antwort",

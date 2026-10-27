@@ -6,6 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { useLiveQuery } from "dexie-react-hooks";
 import { ArrowLeft, ArrowRight, CalendarDays, Check, Eye, Keyboard, Mic, Pencil, PenLine, Play, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { GradedPdf } from "@/components/GradedPdf";
 import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
 import { Modal } from "@/components/Modal";
 import { RichEditor } from "@/components/RichEditor";
@@ -16,7 +17,7 @@ import { formatDateTime, inDays, pluralize } from "@/lib/format";
 import { useAllCards, useFolders } from "@/lib/hooks";
 import { attemptsForCard, deleteAttempt, deleteCard, restoreDeleted, updateCard } from "@/lib/repo";
 import { showToast } from "@/lib/toast";
-import { toPlainText } from "@/lib/richText";
+import { pdfRefs, toPlainText } from "@/lib/richText";
 import { daysUntil, scheduleOf } from "@/lib/srs";
 import { MAX_CARD_TEXT } from "@/lib/syncProtocol";
 import { folderOptions } from "@/lib/tree";
@@ -146,7 +147,18 @@ function CardEditor({ card, folders, preview }: { card: Card; folders: Folder[];
   );
 }
 
+function GradedText({ attempt }: { attempt: Attempt }) {
+  return (
+    <>
+      <GradedSolution segments={attempt.segments} solution={attempt.solutionSnapshot} />
+      <GradeLegend segments={attempt.segments} className="mt-3" />
+    </>
+  );
+}
+
 function History({ attempts }: { attempts: Attempt[] }) {
+  // A PDF with the grading on it is only opened once its attempt is unfolded.
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
   if (attempts.length === 0) {
     return (
       <div className="rounded-box border-2 border-dashed border-base-300 p-8 text-center">
@@ -183,7 +195,13 @@ function History({ attempts }: { attempts: Attempt[] }) {
           .reverse()
           .map(({ attempt, previous }) => (
             <li key={attempt.id}>
-              <details className="collapse-arrow tile collapse">
+              <details
+                className="collapse-arrow tile collapse"
+                onToggle={(event) => {
+                  const open = event.currentTarget.open;
+                  setOpened((was) => ({ ...was, [attempt.id]: open }));
+                }}
+              >
                 <summary className="collapse-title flex flex-wrap items-center gap-x-3 gap-y-1">
                   {attempt.inputMode === "voice" ? (
                     <Mic className="size-4 opacity-60" aria-label="Gesprochen" />
@@ -211,8 +229,16 @@ function History({ attempts }: { attempts: Attempt[] }) {
                   </div>
                   <div>
                     <h4 className="mb-1.5 text-xs font-extrabold tracking-wide uppercase opacity-60">Lösung</h4>
-                    <GradedSolution segments={attempt.segments} solution={attempt.solutionSnapshot} />
-                    <GradeLegend segments={attempt.segments} className="mt-3" />
+                    {opened[attempt.id] && pdfRefs(attempt.solutionSnapshot).length > 0 ? (
+                      <GradedPdf
+                        solution={attempt.solutionSnapshot}
+                        segments={attempt.segments}
+                        className="h-[36rem]"
+                        fallback={<GradedText attempt={attempt} />}
+                      />
+                    ) : (
+                      <GradedText attempt={attempt} />
+                    )}
                   </div>
                 </div>
               </details>
