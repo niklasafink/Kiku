@@ -747,7 +747,7 @@ export function InkToolbar({
         title={selection ? "Auswahl löschen" : clearLabel}
       >
         <Trash2 className="size-4" />
-        <span className="grid" aria-hidden>
+        <span className="grid text-left" aria-hidden>
           <span className={`col-start-1 row-start-1 ${selection ? "" : "invisible"}`}>Auswahl</span>
           <span className={`col-start-1 row-start-1 ${selection ? "invisible" : ""}`}>{clearText}</span>
         </span>
