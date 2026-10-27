@@ -463,7 +463,7 @@ export function TandemSession({ folder, folders, cards }: { folder: Folder; fold
 
       {current && (
         <section className="tile flex flex-col gap-3 p-5">
-          <RichText text={current.card.question} className="font-bold" />
+          <RichText text={current.card.question} />
           {showSolution && (
             <div className="border-t-2 border-base-300 pt-3">
               <RichText text={current.card.solution} />

@@ -129,8 +129,10 @@ describe("attached PDFs and their markings", () => {
     expect(joinPdfs("Aufgabe 1", pdfs, "ink-id-1")).toBe(text);
   });
 
-  it("names the markings only where a PDF is attached", () => {
-    expect(joinPdfs("Text", [], "ink-id-1")).toBe("Text");
+  it("names the markings on a text without PDFs too, and none if there are none", () => {
+    const text = joinPdfs("Text", [], "ink-id-1");
+    expect(splitPdfs(text)).toEqual({ body: "Text", pdfs: [], ink: "ink-id-1" });
+    expect(toPlainText(text)).toBe("Text");
     expect(inkRef(joinPdfs("", pdfs))).toBeNull();
   });
 

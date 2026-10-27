@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, Fragment, useContext, useEffect, useState, type ReactNode } from "react";
-import { FileText, ImageOff } from "lucide-react";
+import { createContext, Fragment, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { FileText, ImageOff, X, ZoomIn, ZoomOut } from "lucide-react";
 import { imageUrl } from "@/lib/images";
 // Layout and fonts of typeset formulas.
 import "katex/dist/katex.min.css";
@@ -44,6 +45,81 @@ export function CardImage({ id, alt, className = "" }: { id: string; alt?: strin
         </>
       )}
     </span>
+  );
+}
+
+/**
+ * A picture in a card that opens over the whole screen when tapped, so diagrams with small print
+ * can be read. Tapping the picture there switches between fitting the screen and 2.5 times as wide.
+ */
+export function ZoomableImage({ id, alt, className = "" }: { id: string; alt?: string; className?: string }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
+
+  // The dialog is only in the page while open; show it as a modal as soon as it is there.
+  useEffect(() => {
+    if (open) ref.current?.showModal();
+  }, [open]);
+
+  const toggle = () => setZoomed((z) => !z);
+  return (
+    <>
+      <button
+        type="button"
+        className={`block max-w-full cursor-zoom-in ${className}`}
+        aria-label="Bild vergrößern"
+        onClick={(event) => {
+          // The card underneath may turn on a tap; this tap is only for the picture.
+          event.stopPropagation();
+          setZoomed(false);
+          setOpen(true);
+        }}
+      >
+        <CardImage id={id} alt={alt} className="block" />
+      </button>
+      {/* The picture sits inside a paragraph, where a dialog may not stand: hang it on the body. */}
+      {open &&
+        createPortal(
+          <dialog ref={ref} className="modal" onClose={() => setOpen(false)} onClick={(event) => event.stopPropagation()}>
+            <div className="modal-box flex h-dvh max-h-dvh w-full max-w-none flex-col gap-2 rounded-none p-2 sm:p-4">
+              <div className="flex items-center justify-end gap-1">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-square btn-sm"
+                  aria-label={zoomed ? "Verkleinern" : "Vergrößern"}
+                  onClick={toggle}
+                >
+                  {zoomed ? <ZoomOut className="size-5" /> : <ZoomIn className="size-5" />}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-square btn-sm"
+                  aria-label="Schließen"
+                  onClick={() => setOpen(false)}
+                >
+                  <X className="size-5" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
+                <button
+                  type="button"
+                  className={`block ${zoomed ? "w-[250%] max-w-none cursor-zoom-out" : "m-auto w-full cursor-zoom-in"}`}
+                  aria-label={zoomed ? "Verkleinern" : "Vergrößern"}
+                  onClick={toggle}
+                >
+                  <CardImage
+                    id={id}
+                    alt={alt}
+                    className={zoomed ? "!max-h-none w-full" : "mx-auto !max-h-[calc(100dvh-5rem)] object-contain"}
+                  />
+                </button>
+              </div>
+            </div>
+          </dialog>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -159,7 +235,7 @@ function renderInline(inlines: Inline[], overlay?: Overlay): ReactNode {
         }
         const occlusion = parseOcclusion(inline.alt);
         if (occlusion) return <OccludedImage key={i} id={inline.id} occlusion={occlusion} />;
-        return <CardImage key={i} id={inline.id} alt={inline.alt} className="my-1 block" />;
+        return <ZoomableImage key={i} id={inline.id} alt={inline.alt} className="my-1" />;
       }
     }
   });

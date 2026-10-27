@@ -14,8 +14,11 @@ const TYPE = "application/json";
 
 /** The strokes on the pages of one PDF, by page number (counted from 1). */
 export type PageInk = Record<number, Stroke[]>;
-/** The strokes on all PDFs of a card side, by the id of the PDF. */
+/** The strokes on all PDFs of a card side, by the id of the PDF; those on its text under TEXT_INK. */
 export type PdfInk = Record<string, PageInk>;
+
+/** Where the strokes on the text of a card side are kept in the file: as page 1 of this "PDF". */
+export const TEXT_INK = "text";
 
 /**
  * The file: per PDF and page a list of strokes, each as numbers: a flag (1 = marker), then x, y and

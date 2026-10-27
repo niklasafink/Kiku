@@ -165,7 +165,7 @@ export function pdfMarkup(id: string, name: string): string {
 }
 
 /**
- * What a reader marked on the attached PDFs is kept in one small file next to them (see pdfInk.ts),
+ * What a reader marked on the attached PDFs, or on the text itself, is kept in one small file (see pdfInk.ts),
  * attached like a picture with the alternative text "ink:". It is not a picture and not text.
  */
 export const INK_ALT = "ink:";
@@ -200,9 +200,9 @@ export function splitPdfs(text: string): { body: string; pdfs: { id: string; nam
   return { body, pdfs, ink: inkRef(text) };
 }
 
-/** Puts attached PDFs (and the file with their markings) behind a text, each on a line of its own. */
+/** Puts attached PDFs (and the file with the markings on them and on the text) behind a text, each on a line of its own. */
 export function joinPdfs(body: string, pdfs: { id: string; name: string }[], ink?: string | null): string {
-  const marks = [...pdfs.map((pdf) => pdfMarkup(pdf.id, pdf.name)), ...(ink && pdfs.length > 0 ? [inkMarkup(ink)] : [])].join("\n\n");
+  const marks = [...pdfs.map((pdf) => pdfMarkup(pdf.id, pdf.name)), ...(ink ? [inkMarkup(ink)] : [])].join("\n\n");
   return marks ? (body.trim() ? `${body.trimEnd()}\n\n${marks}` : marks) : body;
 }
 

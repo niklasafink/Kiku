@@ -943,7 +943,7 @@ export function StudySession({
             id: "task",
             label: "Aufgabe",
             Icon: ClipboardList,
-            node: <SideView key={card.id} text={card.question} onChange={(text) => saveSide(card.id, "question", text)} className="text-lg font-extrabold" />,
+            node: <SideView key={card.id} text={card.question} onChange={(text) => saveSide(card.id, "question", text)} />,
           },
           ...solutionTab,
         ]}

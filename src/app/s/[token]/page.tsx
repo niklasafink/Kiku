@@ -92,7 +92,7 @@ export default function SharedDeckPage() {
             <li key={card.id} className="grid gap-2 sm:grid-cols-2 sm:gap-3">
               <div className="tile px-4 py-3">
                 <p className="text-[0.68rem] font-extrabold tracking-wide uppercase opacity-50">Frage</p>
-                <RichText text={card.question} className="mt-1 font-bold" />
+                <RichText text={card.question} className="mt-1" />
               </div>
               <div className="tile px-4 py-3">
                 <p className="text-[0.68rem] font-extrabold tracking-wide uppercase opacity-50">Lösung</p>

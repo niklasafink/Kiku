@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent, type ReactNode } from "react";
-import { Eraser, Hand, Highlighter, Lasso, PenLine, Redo2, Slash, Trash2, Undo2, type LucideIcon } from "lucide-react";
+import { Eraser, Highlighter, Lasso, PenLine, Redo2, Slash, Trash2, Undo2, type LucideIcon } from "lucide-react";
 import {
   boxOf,
   drawInk,
@@ -96,6 +96,39 @@ const isStylus = (touch: Touch) => (touch as Touch & { touchType?: string }).tou
 const never = () => () => {};
 
 /**
+ * Whether this device has been written on with a pen (Apple Pencil or another stylus). Until then a
+ * finger writes and two fingers scroll; from then on only the pen writes, a finger scrolls and a
+ * resting hand does nothing. Remembered on the device, so nothing has to be switched by hand.
+ */
+const PEN_KEY = "kiku-pen";
+let penKnown: boolean | null = null;
+const penListeners = new Set<() => void>();
+function knowsPen(): boolean {
+  if (penKnown === null) {
+    try {
+      penKnown = localStorage.getItem(PEN_KEY) === "1";
+    } catch {
+      penKnown = false;
+    }
+  }
+  return penKnown;
+}
+function notePen() {
+  if (knowsPen()) return;
+  penKnown = true;
+  try {
+    localStorage.setItem(PEN_KEY, "1");
+  } catch {
+    // Private browsing: the pen is noticed again next time.
+  }
+  for (const listener of penListeners) listener();
+}
+const watchPen = (listener: () => void) => {
+  penListeners.add(listener);
+  return () => void penListeners.delete(listener);
+};
+
+/**
  * Safari knows no pressure for the first samples of a stroke. They take that of the first sample
  * that has one, or `fallback` if none came; otherwise every stroke would begin with a blot.
  */
@@ -139,8 +172,6 @@ export interface InkSurfaceProps {
   /** The sheet after a change, and as it was before (for the owner's undo). */
   onChange: (next: Stroke[], before: Stroke[]) => void;
   tool: Tool;
-  /** A finger writes too, as it does for the mouse. */
-  fingerWrites: boolean;
   disabled?: boolean;
   /** A page of a PDF: the surface has the size of the page, is see-through and does not grow. Otherwise it is ruled paper. */
   page?: InkPage;
@@ -153,11 +184,12 @@ export interface InkSurfaceProps {
 /**
  * Where the pen writes: the finished writing and, above it, what is in the making (the stroke
  * being drawn, the lasso, the writing being moved), which is painted anew with every movement.
- * The pen writes, a finger scrolls (on iPad the browser scrolls for it and only the pen is kept
- * from scrolling; elsewhere the scrolling is done here), and a resting palm does nothing.
- * The mouse always writes; `fingerWrites` lets a finger write too, for tablets without a pen.
+ * The mouse always writes. On a device that was written on with a pen the pen writes, a finger
+ * scrolls (on iPad the browser scrolls for it and only the pen is kept from scrolling; elsewhere
+ * the scrolling is done here) and a resting palm does nothing; until then a finger writes and two
+ * fingers scroll (see notePen).
  */
-export function InkSurface({ strokes, onChange, tool, fingerWrites, disabled, page, onSelection, children }: InkSurfaceProps) {
+export function InkSurface({ strokes, onChange, tool, disabled, page, onSelection, children }: InkSurfaceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
   const [grown, setHeight] = useState(() => Math.max(START_HEIGHT, inkBottom(strokes) + MARGIN));
@@ -185,7 +217,8 @@ export function InkSurface({ strokes, onChange, tool, fingerWrites, disabled, pa
   const lastPen = useRef(-Infinity);
   // Touches of the hand that rested on the paper while the pen wrote; they never scroll.
   const palms = useRef(new Set<number>());
-  // Whether the browser scrolls for the finger. Not while the finger writes.
+  // A finger writes until a pen was seen; the browser scrolls for it once it does not.
+  const fingerWrites = !useSyncExternalStore(watchPen, knowsPen, () => false);
   const nativeScroll = useSyncExternalStore(never, knowsStylus, () => false) && !fingerWrites;
   // The strokes the lower layer shows, so a stroke that was just finished is not painted twice.
   const painted = useRef<Stroke[] | null>(null);
@@ -315,6 +348,7 @@ export function InkSurface({ strokes, onChange, tool, fingerWrites, disabled, pa
       const changed = Array.from(event.changedTouches);
       if (event.type === "touchstart") {
         if (changed.some(isStylus)) {
+          notePen();
           // The hand that is on the paper already belongs to the pen.
           for (const touch of Array.from(event.touches)) if (!isStylus(touch)) palms.current.add(touch.identifier);
           return event.preventDefault();
@@ -448,7 +482,10 @@ export function InkSurface({ strokes, onChange, tool, fingerWrites, disabled, pa
     const type = event.pointerType;
     if (type === "mouse" && event.button !== 0) return;
     cancelAnimationFrame(momentum.current);
-    if (type === "pen") lastPen.current = event.timeStamp;
+    if (type === "pen") {
+      lastPen.current = event.timeStamp;
+      notePen();
+    }
 
     const active = gesture.current;
     const writes = type === "pen" || type === "mouse" || fingerWrites;
@@ -469,8 +506,16 @@ export function InkSurface({ strokes, onChange, tool, fingerWrites, disabled, pa
       if (type === "pen" && active.type === "pen") finish(active);
       // The pen wins over everything else: a palm that was taken for a stroke is dropped.
       else if (type === "pen") discard(active);
-      else return;
+      else if (type === "touch" && active.type === "touch") {
+        // A second finger: the two scroll, and what the first one began is dropped.
+        discard(active);
+        scrolling.current = { pointerId: event.pointerId, y: event.clientY, moved: false, velocity: 0, time: event.timeStamp };
+        capture(event.currentTarget, event.pointerId);
+        return;
+      } else return;
     }
+    // While a second finger scrolls, the first one does not begin anew.
+    if (type === "touch" && scrolling.current) return;
     scrolling.current = null;
     event.preventDefault();
     capture(event.currentTarget, event.pointerId);
@@ -485,7 +530,9 @@ export function InkSurface({ strokes, onChange, tool, fingerWrites, disabled, pa
     } else if (tool === "lasso") {
       const selected = selectionRef.current;
       const box = selected && boxOf(selected);
-      const grabbed = box && at.x >= box.left - GRAB && at.x <= box.right + GRAB && at.y >= box.top - GRAB && at.y <= box.bottom + GRAB;
+      // The frame is as easy to grab on a page shown small as on paper.
+      const grab = Math.max(GRAB, GRAB / scale);
+      const grabbed = box && at.x >= box.left - grab && at.x <= box.right + grab && at.y >= box.top - grab && at.y <= box.bottom + grab;
       if (grabbed) gesture.current = { ...touching, kind: "move", at };
       else {
         selectionRef.current = null;
@@ -546,12 +593,15 @@ export function InkSurface({ strokes, onChange, tool, fingerWrites, disabled, pa
     else if (active.kind === "move") {
       const selected = selectionRef.current;
       if (!selected) return;
-      // The writing stays on the sheet: not past its left, right or upper edge.
+      // The writing stays on the sheet: not past its left, right or upper edge, and on a page not past its lower one.
       const box = boxOf(selected);
       const width = event.currentTarget.clientWidth;
       const x = offset.current.x + last.x - active.at.x;
       const y = offset.current.y + last.y - active.at.y;
-      offset.current = { x: Math.max(-box.left, Math.min(width - box.right, x)), y: Math.max(-box.top, y) };
+      offset.current = {
+        x: Math.max(-box.left, Math.min(width - box.right, x)),
+        y: Math.max(-box.top, page ? Math.min(page.height - box.bottom, y) : y),
+      };
       active.at = last;
     } else if (active.straight) straighten(active, last);
     else {
@@ -630,12 +680,10 @@ export function InkSurface({ strokes, onChange, tool, fingerWrites, disabled, pa
   );
 }
 
-/** The tools, undo and redo, and the switch for writing with a finger: the same on paper and on a PDF. */
+/** The tools, undo and redo: the same on paper, on a PDF and on a card text. */
 export function InkToolbar({
   tool,
   onTool,
-  fingerWrites,
-  onFingerWrites,
   canUndo,
   canRedo,
   onUndo,
@@ -645,12 +693,10 @@ export function InkToolbar({
   canClear,
   onClear,
   clearLabel = "Blatt leeren",
-  clearText,
+  clearText = "Leeren",
 }: {
   tool: Tool;
   onTool: (tool: Tool) => void;
-  fingerWrites: boolean;
-  onFingerWrites: (on: boolean) => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -664,7 +710,7 @@ export function InkToolbar({
   /** A short word shown next to the bin; the label stays its tooltip. */
   clearText?: string;
 }) {
-  const iconButton = (active = false) => `btn btn-sm btn-square ${active ? "btn-primary" : "btn-ghost"}`;
+  const iconButton = "btn btn-sm btn-square btn-ghost";
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="join" role="group" aria-label="Werkzeug">
@@ -683,40 +729,29 @@ export function InkToolbar({
         ))}
       </div>
       <div className="flex">
-        <button type="button" className={iconButton()} onClick={onUndo} disabled={disabled || !canUndo} aria-label="Rückgängig" title="Rückgängig">
+        <button type="button" className={iconButton} onClick={onUndo} disabled={disabled || !canUndo} aria-label="Rückgängig" title="Rückgängig">
           <Undo2 className="size-4" />
         </button>
-        <button type="button" className={iconButton()} onClick={onRedo} disabled={disabled || !canRedo} aria-label="Wiederholen" title="Wiederholen">
+        <button type="button" className={iconButton} onClick={onRedo} disabled={disabled || !canRedo} aria-label="Wiederholen" title="Wiederholen">
           <Redo2 className="size-4" />
         </button>
       </div>
+      {/* One button for both, as wide as the longer word: a selection must not move the bar, or the
+          sheet below it would slip away from under the pen that is about to drag what it caught. */}
       <button
         type="button"
-        className={iconButton(fingerWrites)}
-        aria-pressed={fingerWrites}
-        onClick={() => onFingerWrites(!fingerWrites)}
-        aria-label="Finger schreibt"
-        title="Ohne Apple Pencil: mit dem Finger schreiben statt scrollen"
+        className="btn btn-ghost btn-sm ml-auto"
+        onClick={selection ? selection.remove : onClear}
+        disabled={disabled || (!selection && !canClear)}
+        aria-label={selection ? "Auswahl löschen" : clearLabel}
+        title={selection ? "Auswahl löschen" : clearLabel}
       >
-        <Hand className="size-4" />
+        <Trash2 className="size-4" />
+        <span className="grid" aria-hidden>
+          <span className={`col-start-1 row-start-1 ${selection ? "" : "invisible"}`}>Auswahl</span>
+          <span className={`col-start-1 row-start-1 ${selection ? "invisible" : ""}`}>{clearText}</span>
+        </span>
       </button>
-      {selection ? (
-        <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={selection.remove} disabled={disabled}>
-          <Trash2 className="size-4" /> Auswahl löschen
-        </button>
-      ) : (
-        <button
-          type="button"
-          className={clearText ? "btn btn-ghost btn-sm ml-auto" : `${iconButton()} ml-auto`}
-          onClick={onClear}
-          disabled={disabled || !canClear}
-          aria-label={clearLabel}
-          title={clearLabel}
-        >
-          <Trash2 className="size-4" />
-          {clearText}
-        </button>
-      )}
     </div>
   );
 }
@@ -747,10 +782,9 @@ export function useInkHistory<T>() {
 }
 
 /**
- * A long sheet of white paper to write on with Apple Pencil or another stylus, seen through a
- * window of fixed height. The pen writes, a finger scrolls the sheet in its window (the page
- * around it stays put), and a resting palm does nothing. The mouse always writes; "Finger
- * schreibt" lets a finger write too, for tablets without a pen.
+ * A long sheet of white paper to write on with Apple Pencil, another stylus or a finger, seen
+ * through a window of fixed height. Once a pen was used, a finger scrolls the sheet in its window
+ * (the page around it stays put) and a resting palm does nothing; before, two fingers scroll.
  *
  * Besides the pen there is a marker, a straight line, an eraser that takes whole strokes away,
  * and a lasso that moves what it caught.
@@ -766,7 +800,6 @@ export function Handwriting({
 }) {
   const windowRef = useRef<HTMLDivElement>(null);
   const [tool, setTool] = useState<Tool>("pen");
-  const [fingerWrites, setFingerWrites] = useState(false);
   const [selection, setSelection] = useState<{ count: number; remove: () => void } | null>(null);
   const history = useInkHistory<Stroke[]>();
 
@@ -782,8 +815,6 @@ export function Handwriting({
       <InkToolbar
         tool={tool}
         onTool={setTool}
-        fingerWrites={fingerWrites}
-        onFingerWrites={setFingerWrites}
         canUndo={history.canUndo || strokes.length > 0}
         canRedo={history.canRedo}
         onUndo={undo}
@@ -809,13 +840,12 @@ export function Handwriting({
             onChange(next);
           }}
           tool={tool}
-          fingerWrites={fingerWrites}
           disabled={disabled}
           onSelection={setSelection}
         >
           {strokes.length === 0 && (
             <p className="pointer-events-none absolute inset-x-0 top-20 px-4 text-center text-sm text-neutral/50">
-              Schreib mit dem Apple Pencil auf das Blatt. Mit einem Finger scrollst du es weiter.
+              Schreib mit dem Apple Pencil oder dem Finger auf das Blatt.
               <br />
               Wenn du fertig bist, tippe auf „Fertig“: dann liest die KI deine Handschrift.
             </p>

@@ -2,12 +2,13 @@
 
 import { useContext, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Highlighter, Redo2, Undo2, type LucideIcon } from "lucide-react";
-import { useInkHistory } from "@/components/Handwriting";
+import type { LucideIcon } from "lucide-react";
+import { InkOverlay, InkSurface, InkToolbar, useInkHistory, type Tool } from "@/components/Handwriting";
 import { PdfViewer, ToolSlot } from "@/components/PdfViewer";
-import { RichText, type Overlay } from "@/components/RichText";
+import { RichText } from "@/components/RichText";
+import type { Stroke } from "@/lib/ink";
+import { INK_PAGE_WIDTH, TEXT_INK } from "@/lib/pdfInk";
 import { pdfRefs } from "@/lib/richText";
-import { locator, markText, unmarkAt, type TextPiece } from "@/lib/textMarks";
 import { useMarkings } from "@/lib/useInk";
 
 export interface PaneTab {
@@ -193,13 +194,16 @@ export function SideView({
 }) {
   const pdfs = pdfRefs(text);
   const [chosen, setChosen] = useState(0);
-  // What was marked on the PDFs, when the card was edited or while practising: shown over the pages.
+  // What was marked on the PDFs or the text, when the card was edited or while practising: shown over them.
   const { markings, mark } = useMarkings(text, onChange ?? KEEP);
   if (pdfs.length === 0) {
     return text.trim() ? (
-      <div className="tile p-4">
-        {onChange ? <MarkableText text={text} onChange={onChange} className={className} /> : <RichText text={text} className={className} />}
-      </div>
+      <TextSheet
+        text={text}
+        className={className}
+        strokes={markings[TEXT_INK]?.[1] ?? NO_STROKES}
+        onStrokes={onChange ? (next) => mark(TEXT_INK, { 1: next }) : undefined}
+      />
     ) : (
       <p className="tile p-4 opacity-70">{empty ?? "Hier steht nichts."}</p>
     );
@@ -228,188 +232,102 @@ export function SideView({
   );
 }
 
-type Caret = { node: Node; offset: number };
-
-/** Where in the text a point on the screen lies (Safari only knows the older of the two ways). */
-function caretAt(x: number, y: number): Caret | null {
-  const doc = document as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null };
-  if (typeof doc.caretPositionFromPoint === "function") {
-    const position = doc.caretPositionFromPoint(x, y);
-    return position && { node: position.offsetNode, offset: position.offset };
-  }
-  const range = doc.caretRangeFromPoint?.(x, y);
-  return range ? { node: range.startContainer, offset: range.startOffset } : null;
-}
-
-/** The pieces of text shown in `root`, each in a span that names where it stands in the card text. */
-function shownPieces(root: HTMLElement): { span: HTMLElement; piece: TextPiece }[] {
-  return [...root.querySelectorAll<HTMLElement>("span[data-at]")].map((span) => ({
-    span,
-    piece: { at: Number(span.dataset.at), length: span.textContent?.length ?? 0, marked: span.closest("mark") !== null },
-  }));
-}
-
-/** The position in the card text of a point in the shown text; before the first piece, 0. */
-function sourceOffset(root: HTMLElement, { node, offset }: Caret): number {
-  let before = 0;
-  for (const { span, piece } of shownPieces(root)) {
-    const range = document.createRange();
-    range.selectNodeContents(span);
-    const side = range.comparePoint(node, offset);
-    if (side < 0) return before;
-    if (side === 0) return piece.at + (span.contains(node) && node.nodeType === Node.TEXT_NODE ? offset : offset > 0 ? piece.length : 0);
-    before = piece.at + piece.length;
-  }
-  return before;
-}
+const NO_STROKES: Stroke[] = [];
+/** A side wider than this does not set the text larger still; the sheet then stands in its middle. */
+const MAX_TEXT_SCALE = 1.25;
 
 /**
- * A card text that can be marked while practising, with a highlighter: drag over the words, or
- * select them and tap the highlighter. A tap on a marking takes it away. The markings are saved
- * on the card as ==marked== text (see textMarks.ts), so they follow the text when it wraps.
- * The tools stand next to the tabs, like those for a PDF.
+ * The text of a card side as a sheet of paper that can be marked like a page of a PDF, with the same
+ * tools. The text is set at a fixed width and the sheet scaled to the width of the side, so the
+ * strokes stay on the words they were made on when the side gets wider or narrower.
+ * The tools stand next to the tabs.
  */
-function MarkableText({ text: raw, onChange, className }: { text: string; onChange: (text: string) => void; className: string }) {
-  // RichText reads the text without carriage returns; positions are counted the same way.
-  const text = raw.replace(/\r/g, "");
-  const root = useRef<HTMLDivElement>(null);
-  const [on, setOn] = useState(false);
-  const drag = useRef<{ start: Caret; moved: boolean; target: EventTarget } | null>(null);
-  const history = useInkHistory<string>();
+function TextSheet({
+  text,
+  className,
+  strokes,
+  onStrokes,
+}: {
+  text: string;
+  className: string;
+  strokes: Stroke[];
+  onStrokes?: (next: Stroke[]) => void;
+}) {
+  const frame = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const [tool, setTool] = useState<Tool>("marker");
+  const [selection, setSelection] = useState<{ count: number; remove: () => void } | null>(null);
+  const history = useInkHistory<Stroke[]>();
   const slot = useContext(ToolSlot);
 
-  const overlay = (): Overlay => {
-    const find = locator(text);
-    return {
-      text: (piece) => {
-        const at = find(piece);
-        // Code keeps its characters as they are; markup inside it would show.
-        const code = at > 0 && text[at - 1] === "`" && text[at + piece.length] === "`";
-        return at < 0 || code ? piece : <span data-at={at}>{piece}</span>;
-      },
-      formula: (tex, formula) => {
-        find(tex);
-        return formula;
-      },
-    };
-  };
+  useLayoutEffect(() => {
+    const measure = () => setSize({ width: frame.current?.clientWidth ?? 0, height: inner.current?.offsetHeight ?? 0 });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(frame.current!);
+    observer.observe(inner.current!);
+    return () => observer.disconnect();
+  }, []);
 
-  function save(next: string) {
-    if (next === text) return;
-    history.record(text);
-    onChange(next);
-  }
-
-  /** Marks what lies between two points of the shown text. */
-  function markBetween(a: Caret, b: Caret) {
-    const element = root.current;
-    if (!element) return;
-    const [from, to] = [sourceOffset(element, a), sourceOffset(element, b)].sort((x, y) => x - y);
-    save(markText(text, shownPieces(element).map(({ piece }) => piece), from, to));
-  }
-
-  /** What is selected in this text, if anything. */
-  function selected(): Range | null {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
-    const range = selection.getRangeAt(0);
-    return root.current?.contains(range.commonAncestorContainer) ? range : null;
-  }
-
-  function unmark(target: EventTarget) {
-    const mark = (target as HTMLElement).closest?.("mark");
-    const span = mark?.querySelector<HTMLElement>("span[data-at]");
-    if (span) save(unmarkAt(text, Number(span.dataset.at)));
-  }
-
-  const tools = (
-    <div className="flex items-center gap-1">
-      <button
-        type="button"
-        className={`btn btn-sm gap-1 ${on ? "btn-primary" : "bg-base-100"}`}
-        aria-pressed={on}
-        title="Textmarker: über die Wörter ziehen oder sie auswählen und hier tippen; ein Tipp auf eine Markierung nimmt sie weg"
-        // Keeps a selection made by hand, so the tap marks it.
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => {
-          const range = selected();
-          if (range) {
-            markBetween({ node: range.startContainer, offset: range.startOffset }, { node: range.endContainer, offset: range.endOffset });
-            window.getSelection()?.removeAllRanges();
-          } else {
-            setOn(!on);
-          }
-        }}
-      >
-        <Highlighter className="size-4" aria-hidden /> Markieren
-      </button>
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm btn-square"
-        disabled={!history.canUndo}
-        aria-label="Rückgängig"
-        title="Rückgängig"
-        onClick={() => {
-          const previous = history.undo(text);
-          if (previous !== undefined) onChange(previous);
-        }}
-      >
-        <Undo2 className="size-4" />
-      </button>
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm btn-square"
-        disabled={!history.canRedo}
-        aria-label="Wiederholen"
-        title="Wiederholen"
-        onClick={() => {
-          const next = history.redo(text);
-          if (next !== undefined) onChange(next);
-        }}
-      >
-        <Redo2 className="size-4" />
-      </button>
-    </div>
+  const scale = Math.min(MAX_TEXT_SCALE, size.width / INK_PAGE_WIDTH);
+  const page = { width: INK_PAGE_WIDTH, height: size.height, scale };
+  const tools = onStrokes && (
+    <InkToolbar
+      tool={tool}
+      onTool={setTool}
+      canUndo={history.canUndo}
+      canRedo={history.canRedo}
+      onUndo={() => {
+        const previous = history.undo(strokes);
+        if (previous) onStrokes(previous);
+      }}
+      onRedo={() => {
+        const next = history.redo(strokes);
+        if (next) onStrokes(next);
+      }}
+      selection={selection}
+      canClear={strokes.length > 0}
+      onClear={() => {
+        history.record(strokes);
+        onStrokes([]);
+      }}
+      clearLabel="Alle Anmerkungen löschen"
+      clearText="Alle"
+    />
   );
 
   return (
     <>
-      {slot ? createPortal(tools, slot) : <div className="mb-2">{tools}</div>}
-      <div
-        ref={root}
-        className={on ? "cursor-text touch-none [&_mark]:cursor-pointer" : ""}
-        onPointerDown={(event) => {
-          if (!on || event.button !== 0) return;
-          const start = caretAt(event.clientX, event.clientY);
-          if (!start) return;
-          // The highlighter draws its own selection instead of the browser's, and the finger does not scroll.
-          event.preventDefault();
-          event.currentTarget.setPointerCapture(event.pointerId);
-          drag.current = { start, moved: false, target: event.target };
-        }}
-        onPointerMove={(event) => {
-          const current = drag.current;
-          const point = current && caretAt(event.clientX, event.clientY);
-          if (!current || !point) return;
-          current.moved = current.moved || point.node !== current.start.node || point.offset !== current.start.offset;
-          window.getSelection()?.setBaseAndExtent(current.start.node, current.start.offset, point.node, point.offset);
-        }}
-        onPointerUp={(event) => {
-          const current = drag.current;
-          drag.current = null;
-          if (!current) return;
-          window.getSelection()?.removeAllRanges();
-          const point = caretAt(event.clientX, event.clientY);
-          if (current.moved && point) markBetween(current.start, point);
-          // The pointer is held by the text, so the tapped element is the one it went down on.
-          else unmark(current.target);
-        }}
-        onPointerCancel={() => {
-          drag.current = null;
-          window.getSelection()?.removeAllRanges();
-        }}
-      >
-        <RichText text={text} className={className} overlay={overlay} />
+      {tools && (slot ? createPortal(tools, slot) : <div className="mb-2">{tools}</div>)}
+      {/* Paper whatever the theme, like a page of a PDF, so the ink is always dark on light. */}
+      <div ref={frame} className="shrink-0">
+        <div
+          className="relative mx-auto overflow-hidden rounded-box bg-white text-neutral-900 shadow-md ring-1 ring-black/10"
+          style={{ width: INK_PAGE_WIDTH * scale || undefined, height: size.height * scale || undefined }}
+        >
+          <div ref={inner} className="origin-top-left p-6" style={{ width: INK_PAGE_WIDTH, transform: `scale(${scale})` }}>
+            <RichText text={text} className={className} />
+          </div>
+          {size.width > 0 && size.height > 0 && (
+            <div className="absolute inset-0">
+              {onStrokes ? (
+                <InkSurface
+                  strokes={strokes}
+                  onChange={(next, before) => {
+                    history.record(before);
+                    onStrokes(next);
+                  }}
+                  tool={tool}
+                  page={page}
+                  onSelection={setSelection}
+                />
+              ) : (
+                <InkOverlay strokes={strokes} page={page} />
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );

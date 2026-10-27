@@ -40,7 +40,6 @@ interface PageSize {
 /** What marking a page needs, the same for every page. */
 interface Marking {
   tool: Tool;
-  fingerWrites: boolean;
   onChange: (page: number, next: Stroke[], before: Stroke[]) => void;
   onSelection: (page: number, selection: { count: number; remove: () => void } | null) => void;
 }
@@ -184,7 +183,6 @@ function Page({
               strokes={strokes}
               onChange={(next, before) => marking.onChange(number, next, before)}
               tool={marking.tool}
-              fingerWrites={marking.fingerWrites}
               page={ink}
               onSelection={onSelection}
             />
@@ -263,7 +261,6 @@ export function PdfViewer({
 
   // Marking: the tool, the history of the markings, and what the lasso caught (on one page at a time).
   const [tool, setTool] = useState<Tool>("marker");
-  const [fingerWrites, setFingerWrites] = useState(false);
   const [selected, setSelected] = useState<{ page: number; count: number; remove: () => void } | null>(null);
   const history = useInkHistory<PageInk>();
   const inkRef = useRef(ink);
@@ -291,8 +288,8 @@ export function PdfViewer({
     setSelected((was) => (selection ? { page, ...selection } : was?.page === page ? null : was));
   }, []);
   const marking = useMemo<Marking | undefined>(
-    () => (marks ? { tool, fingerWrites, onChange: change, onSelection: select } : undefined),
-    [marks, tool, fingerWrites, change, select],
+    () => (marks ? { tool, onChange: change, onSelection: select } : undefined),
+    [marks, tool, change, select],
   );
   // ?pdfdebug in the address shows what the reader did, for a screenshot when a PDF looks wrong.
   const [debug, setDebug] = useState<string[]>([]);
@@ -569,8 +566,6 @@ export function PdfViewer({
     <InkToolbar
       tool={tool}
       onTool={setTool}
-      fingerWrites={fingerWrites}
-      onFingerWrites={setFingerWrites}
       canUndo={history.canUndo}
       canRedo={history.canRedo}
       onUndo={() => {
