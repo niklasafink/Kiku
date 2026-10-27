@@ -233,6 +233,14 @@ export function SideView({
 }
 
 const NO_STROKES: Stroke[] = [];
+
+/** A tap on the sheet over a picture that can be enlarged opens it, instead of leaving a dot. */
+function openPicture(clientX: number, clientY: number) {
+  const picture = document.elementsFromPoint(clientX, clientY).find((element) => element.matches("[data-zoomable]"));
+  if (!(picture instanceof HTMLElement)) return false;
+  picture.click();
+  return true;
+}
 /** A side wider than this does not set the text larger still; the sheet then stands in its middle. */
 const MAX_TEXT_SCALE = 1.25;
 
@@ -321,6 +329,7 @@ function TextSheet({
                   tool={tool}
                   page={page}
                   onSelection={setSelection}
+                  onTap={openPicture}
                 />
               ) : (
                 <InkOverlay strokes={strokes} page={page} />

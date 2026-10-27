@@ -29,6 +29,9 @@ const SELECTION = "#4f5bd5";
 const MAX_PIXELS = 16_000_000;
 /** How far a finger moves before it scrolls: a hand that only rests on the paper stays below it. */
 const SCROLL_SLOP = 8;
+/** A touch that ends this soon and this close to where it began is a tap, not a stroke (ms, CSS px). */
+const TAP_TIME = 300;
+const TAP_SLOP = 6;
 /** A touch this soon after the pen was on the paper is the writing hand, not a finger that scrolls. */
 const PALM_GRACE = 300;
 /** A stroke without news from its pen for this long lost its end (iPadOS swallows it at times). */
@@ -177,6 +180,8 @@ export interface InkSurfaceProps {
   page?: InkPage;
   /** Told about what the lasso caught, with a way to delete it, and told again with null once it is gone. */
   onSelection?: (selection: { count: number; remove: () => void } | null) => void;
+  /** Told about a tap at a point of the screen; returning true means it was used and leaves no ink. */
+  onTap?: (clientX: number, clientY: number) => boolean;
   /** Shown on the surface, e.g. a hint on an empty sheet. */
   children?: ReactNode;
 }
@@ -189,7 +194,7 @@ export interface InkSurfaceProps {
  * the scrolling is done here) and a resting palm does nothing; until then a finger writes and two
  * fingers scroll (see notePen).
  */
-export function InkSurface({ strokes, onChange, tool, disabled, page, onSelection, children }: InkSurfaceProps) {
+export function InkSurface({ strokes, onChange, tool, disabled, page, onSelection, onTap, children }: InkSurfaceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
   const [grown, setHeight] = useState(() => Math.max(START_HEIGHT, inkBottom(strokes) + MARGIN));
@@ -206,6 +211,8 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   // The finished writing as the lower layer shows it: what is selected lies on the upper one.
   const shown = useMemo(() => (selection ? strokes.filter((stroke) => !selection.includes(stroke)) : strokes), [strokes, selection]);
   const gesture = useRef<Gesture | null>(null);
+  // Where and when the pointer of the gesture came down, to tell a tap from a stroke.
+  const down = useRef({ x: 0, y: 0, time: 0 });
   // How far the selected writing has been dragged from where it lies.
   const offset = useRef({ x: 0, y: 0 });
   // A finger that scrolls the page.
@@ -519,6 +526,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     scrolling.current = null;
     event.preventDefault();
     capture(event.currentTarget, event.pointerId);
+    down.current = { x: event.clientX, y: event.clientY, time: event.timeStamp };
     const touching = { pointerId: event.pointerId, type, time: event.timeStamp };
     const points = pointsOf(event);
     const [at] = points;
@@ -635,6 +643,12 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     }
     const active = gesture.current;
     if (!active || active.pointerId !== event.pointerId) return;
+    const start = down.current;
+    const tapped =
+      event.type === "pointerup" &&
+      event.timeStamp - start.time < TAP_TIME &&
+      Math.hypot(event.clientX - start.x, event.clientY - start.y) < TAP_SLOP;
+    if (tapped && onTap?.(event.clientX, event.clientY)) return discard(active);
     // Also when the browser took the pen away (pointercancel): what was written so far is kept.
     finish(active);
   }
