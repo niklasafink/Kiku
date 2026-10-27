@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
-import { ArrowLeft, ArrowRight, BookOpen, Check, ClipboardCheck, ClipboardList, CloudOff, Eye, EyeOff, FileCheck, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, Upload, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Check, ClipboardCheck, ClipboardList, CloudOff, FileCheck, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, Upload, X } from "lucide-react";
 import { useAccount } from "@/components/Account";
 import { GradedPdf, prefetchPdfText } from "@/components/GradedPdf";
 import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
@@ -116,11 +116,6 @@ export function StudySession({
   const [handedIn, setHandedIn] = useState(!exam);
   const [handingIn, setHandingIn] = useState(false);
   const [explainingId, setExplainingId] = useState<string | null>(null);
-  // The card whose solution is shown under the question while it is still being answered.
-  const [peekId, setPeekId] = useState<string | null>(null);
-  // While peeking, question and answer side fill the window below the bar and scroll each on their own.
-  const split = useRef<HTMLDivElement>(null);
-  const [splitTop, setSplitTop] = useState(0);
   // Lets "Abbrechen" stop a grading or hand-in that is running.
   const abort = useRef<AbortController | null>(null);
   // Hands-free: the question is read aloud, the answer recorded and graded, the result read out, then the next card.
@@ -187,19 +182,7 @@ export function StudySession({
     return () => window.removeEventListener("keydown", onKeyDown);
   });
 
-  const peeking = handedIn && card !== null && peekId === card.id && !state.attempt && !state.revealed && !state.pending;
-  useLayoutEffect(() => {
-    if (!peeking) return;
-    const measure = () => {
-      const element = split.current;
-      if (element) setSplitTop(element.getBoundingClientRect().top + window.scrollY);
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [peeking]);
-
-  /** Markings made on a PDF while practising stay on the card, as if it had been edited. */
+  /** Markings made on a PDF or in the text while practising stay on the card, as if it had been edited. */
   function saveSide(cardId: string, side: "question" | "solution", text: string) {
     setCards((all) => all.map((c) => (c.id === cardId ? { ...c, [side]: text } : c)));
     void updateCard(cardId, { [side]: text });
@@ -623,11 +606,8 @@ export function StudySession({
   const strokes = state.ink ?? [];
   const inputShown = !attempt && !state.revealed && !state.pending;
   const answering = handedIn && inputShown;
-  // A card with PDFs gets the reader: task and solution left, answer and solution right, each side with tabs.
-  const docMode = pdfRefs(card.question).length > 0 || pdfRefs(card.solution).length > 0;
-  // Writing by hand needs room: the answer side gets two thirds of the width.
-  const writing = mode === "pen" && inputShown && !docMode;
-  const column = peeking ? "md:min-h-0 md:overflow-y-auto md:overscroll-contain md:pb-1" : "";
+  // Writing by hand on a card without PDFs needs room: the answer side starts with two thirds of the width.
+  const writing = mode === "pen" && inputShown && pdfRefs(card.question).length === 0 && pdfRefs(card.solution).length === 0;
   const readingThis = reading?.cardId === card.id ? reading : null;
 
   const iconButton = "btn btn-sm btn-square shrink-0";
@@ -641,7 +621,7 @@ export function StudySession({
         <X className="size-4" />
       </Link>
       {/* Favourite, arrows and the count on the left, the progress in the middle, the rest on the right. */}
-      {docMode && handedIn && <LiveStar cardId={card.id} />}
+      <LiveStar cardId={card.id} />
       <div className="join shrink-0">
         <button className="btn join-item btn-sm btn-square bg-base-100" onClick={() => go(index - 1)} disabled={index === 0 || grading} aria-label="Vorherige Karte" title="Vorherige Karte (←)">
           <ArrowLeft className="size-4" />
@@ -660,7 +640,7 @@ export function StudySession({
         </button>
       </div>
       <progress className="progress progress-primary order-last mx-1 h-1.5 basis-full sm:order-none sm:min-w-10 sm:flex-1 sm:basis-0" value={answered} max={cards.length} aria-label="Fortschritt" />
-      {docMode && handedIn && (
+      {handedIn && (
         <Link href={`/c/${card.id}`} className={`${iconButton} btn-ghost`} title="Karte ansehen und bearbeiten" aria-label="Karte bearbeiten">
           <Pencil className="size-4" />
         </Link>
@@ -746,27 +726,14 @@ export function StudySession({
               <X className="size-4" /> Abbrechen
             </button>
           ) : (
-            <>
-              {!docMode && (
-                <button
-                  className={`${iconButton} ${peeking ? "btn-active" : "btn-ghost"}`}
-                  aria-pressed={peeking}
-                  aria-label="Spicken"
-                  onClick={() => setPeekId(peeking ? null : card.id)}
-                  title="Spicken: Lösung unter der Frage einblenden und trotzdem antworten"
-                >
-                  {peeking ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                </button>
-              )}
-              <button
-                className={`${iconButton} btn-ghost`}
-                aria-label="Lösung zeigen"
-                onClick={() => patch(card.id, { revealed: true })}
-                title="Lösung ansehen, ohne zu antworten"
-              >
-                <BookOpen className="size-4" />
-              </button>
-            </>
+            <button
+              className={`${iconButton} btn-ghost`}
+              aria-label="Lösung zeigen"
+              onClick={() => patch(card.id, { revealed: true })}
+              title="Lösung ansehen, ohne zu antworten"
+            >
+              <BookOpen className="size-4" />
+            </button>
           )}
           <button
             className="btn btn-primary btn-sm shrink-0"
@@ -930,111 +897,72 @@ export function StudySession({
     </section>
   );
 
-  if (docMode) {
-    const result = attempt ? (
-      <>
-        {scoreBlock}
-        {gradedBlock}
-        {yourAnswerBlock}
-        {explainBlock}
-      </>
-    ) : state.pending ? (
-      pendingBlock
-    ) : state.revealed ? (
-      revealedBlock
-    ) : (
-      inputBlock
-    );
-    // The grading laid over the solution PDF comes first once there is a result.
-    const gradedPdf = attempt && pdfRefs(attempt.solutionSnapshot).length > 0 && (
-      <GradedPdf
-        solution={attempt.solutionSnapshot}
-        segments={attempt.segments}
-        className="h-full"
-        header={
-          <p className="flex flex-wrap items-center gap-2 text-sm">
-            <ScoreBadge score={attempt.score} />
-            <span className="font-bold">{praise(attempt.score)}</span>
-            {state.previousScore !== null && <Trend delta={attempt.score - state.previousScore} />}
-          </p>
-        }
-        fallback={gradedBlock}
-      />
-    );
-    return (
-      <div className="flex flex-col gap-2">
-        {bar}
-        <DocWorkspace
-          resultKey={`${card.id}:${attempt?.id ?? ""}`}
-          left={[
-            { id: "task", label: "Aufgabe", Icon: ClipboardList, node: <SideView key={card.id} text={card.question} onChange={(text) => saveSide(card.id, "question", text)} /> },
-            { id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView key={card.id} text={card.solution} onChange={(text) => saveSide(card.id, "solution", text)} /> },
-          ]}
-          right={[
-            ...(gradedPdf ? [{ id: "graded", label: "Bewertung", Icon: FileCheck, node: gradedPdf }] : []),
-            {
-              id: "answer",
-              label: attempt ? "Ergebnis" : "Antwort",
-              Icon: attempt ? ClipboardCheck : PenLine,
-              node: (
-                <>
-                  {result}
-                  {errorBlock}
-                </>
-              ),
-            },
-            { id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView key={card.id} text={card.solution} onChange={(text) => saveSide(card.id, "solution", text)} /> },
-          ]}
-        />
-      </div>
-    );
-  }
-
+  const result = attempt ? (
+    <>
+      {scoreBlock}
+      {gradedBlock}
+      {yourAnswerBlock}
+      {explainBlock}
+    </>
+  ) : state.pending ? (
+    pendingBlock
+  ) : state.revealed ? (
+    revealedBlock
+  ) : (
+    inputBlock
+  );
+  // The grading laid over the solution PDF comes first once there is a result.
+  const gradedPdf = attempt && pdfRefs(attempt.solutionSnapshot).length > 0 && (
+    <GradedPdf
+      solution={attempt.solutionSnapshot}
+      segments={attempt.segments}
+      className="h-full"
+      header={
+        <p className="flex flex-wrap items-center gap-2 text-sm">
+          <ScoreBadge score={attempt.score} />
+          <span className="font-bold">{praise(attempt.score)}</span>
+          {state.previousScore !== null && <Trend delta={attempt.score - state.previousScore} />}
+        </p>
+      }
+      fallback={gradedBlock}
+    />
+  );
+  // During an exam the solution stays hidden until it is handed in.
+  const solutionTab = handedIn
+    ? [{ id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView key={card.id} text={card.solution} onChange={(text) => saveSide(card.id, "solution", text)} /> }]
+    : [];
+  // Task and solution left, answer and solution right, each side with tabs; PDFs and text can be marked on both.
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-2">
       {bar}
-
-      <div
-        key={card.id}
-        ref={split}
-        className={`grid gap-3 ${writing ? "md:grid-cols-[1fr_2fr]" : "md:grid-cols-2"} ${
-          peeking ? "items-start md:h-[calc(100dvh-var(--split-top)-1rem)] md:grid-rows-[minmax(0,1fr)] md:items-stretch" : "items-start"
-        }`}
-        style={peeking ? ({ "--split-top": `${splitTop}px` } as React.CSSProperties) : undefined}
-      >
-        {/* Left: the question, later also the score and what you answered. */}
-        <div className={`flex flex-col gap-3 ${peeking ? column : "md:sticky md:top-3"}`}>
-          <section className="tile pop-in p-4">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className={`mr-auto ${LABEL}`}>Frage</h2>
-              <LiveStar cardId={card.id} />
-              {handedIn && (
-                <Link href={`/c/${card.id}`} className="btn btn-ghost btn-xs opacity-70" title="Karte ansehen und bearbeiten">
-                  <Pencil className="size-3.5" /> Karte
-                </Link>
-              )}
-            </div>
-            <RichText text={card.question} className="mt-1 text-lg font-extrabold" />
-          </section>
-
-          {peeking && (
-            <section className="tile pop-in p-4">
-              <h2 className={`mb-1.5 ${LABEL}`}>Lösung</h2>
-              <RichText text={card.solution} className="leading-relaxed" />
-            </section>
-          )}
-
-          {scoreBlock}
-          {yourAnswerBlock}
-          {explainBlock}
-        </div>
-
-        {/* Right: answer input first, then the solution. */}
-        <div className={`flex flex-col gap-3 ${column}`}>
-          {attempt ? gradedBlock : state.pending ? pendingBlock : state.revealed ? revealedBlock : inputBlock}
-          {errorBlock}
-        </div>
-      </div>
+      <DocWorkspace
+        resultKey={`${card.id}:${attempt?.id ?? ""}`}
+        defaultSplit={writing ? 1 / 3 : 0.5}
+        left={[
+          {
+            id: "task",
+            label: "Aufgabe",
+            Icon: ClipboardList,
+            node: <SideView key={card.id} text={card.question} onChange={(text) => saveSide(card.id, "question", text)} className="text-lg font-extrabold" />,
+          },
+          ...solutionTab,
+        ]}
+        right={[
+          ...(gradedPdf ? [{ id: "graded", label: "Bewertung", Icon: FileCheck, node: gradedPdf }] : []),
+          {
+            id: "answer",
+            label: attempt ? "Ergebnis" : "Antwort",
+            Icon: attempt ? ClipboardCheck : PenLine,
+            node: (
+              <>
+                {result}
+                {errorBlock}
+              </>
+            ),
+          },
+          ...solutionTab,
+        ]}
+      />
     </div>
   );
 }
