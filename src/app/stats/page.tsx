@@ -3,14 +3,13 @@
 import Link from "next/link";
 import { useState } from "react";
 import { CalendarDays, Flame, Target, TrendingUp } from "lucide-react";
+import { ActivityCalendar } from "@/components/ActivityCalendar";
 import { formatDate, pluralize } from "@/lib/format";
 import { useAllCards, useAttemptLog, useDocumentTitle, useFolders, useSchedules } from "@/lib/hooks";
 import { useNewPerDay } from "@/lib/settings";
 import { DAY, planToday } from "@/lib/srs";
-import { activity, averageScore, dueForecast, streakOf, type DayActivity } from "@/lib/stats";
+import { activity, averageScore, dueForecast, streakOf } from "@/lib/stats";
 
-const WEEKS = 18;
-const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const weekday = new Intl.DateTimeFormat("de-DE", { weekday: "short" });
 const HEADING = "text-xs font-extrabold tracking-wide uppercase opacity-60";
 
@@ -22,52 +21,6 @@ function Stat({ icon: Icon, label, value, note }: { icon: typeof Flame; label: s
       </span>
       <span className="text-3xl font-black tabular-nums">{value}</span>
       {note && <span className="text-sm opacity-70">{note}</span>}
-    </div>
-  );
-}
-
-/** Shade of one day in the calendar: none, then four steps of the same colour. */
-function shade(answers: number, most: number): string {
-  if (answers === 0) return "bg-base-300/60";
-  const share = answers / most;
-  if (share > 0.75) return "bg-primary";
-  if (share > 0.5) return "bg-primary/75";
-  if (share > 0.25) return "bg-primary/50";
-  return "bg-primary/30";
-}
-
-/** One column per week, Monday at the top, like the contribution calendars people know. */
-function Calendar({ days }: { days: DayActivity[] }) {
-  const most = Math.max(1, ...days.map((d) => d.answers));
-  // Pad so the first column starts on a Monday.
-  const offset = (new Date(days[0].day).getDay() + 6) % 7;
-  const cells: (DayActivity | null)[] = [...Array.from({ length: offset }, () => null), ...days];
-  return (
-    <div className="flex gap-2 overflow-x-auto pb-1">
-      <div className="grid shrink-0 grid-rows-7 gap-1 text-[0.65rem] leading-4 opacity-60" aria-hidden>
-        {WEEKDAYS.map((name, i) => (
-          <span key={name} className={i % 2 === 1 ? "invisible" : ""}>
-            {name}
-          </span>
-        ))}
-      </div>
-      <ol className="grid grid-flow-col grid-rows-7 gap-1" aria-label="Antworten pro Tag">
-        {cells.map((cell, i) =>
-          cell ? (
-            <li
-              key={cell.day}
-              className={`size-4 rounded-[4px] ${shade(cell.answers, most)}`}
-              title={`${formatDate(cell.day)}: ${pluralize(cell.answers, "Antwort", "Antworten")}${cell.average !== null ? `, Ø ${cell.average} %` : ""}`}
-            >
-              <span className="sr-only">
-                {formatDate(cell.day)}: {pluralize(cell.answers, "Antwort", "Antworten")}
-              </span>
-            </li>
-          ) : (
-            <li key={`pad-${i}`} className="size-4" aria-hidden />
-          ),
-        )}
-      </ol>
     </div>
   );
 }
@@ -103,8 +56,8 @@ export default function StatsPage() {
   if (!log || !cards || !folders || !schedules) return <div className="skeleton h-64 w-full rounded-box" />;
 
   const streak = streakOf(log.map((a) => a.createdAt), now);
-  const days = activity(log, now, WEEKS * 7);
-  const todayAnswers = days.at(-1)!.answers;
+  const lastWeek = activity(log, now, 7);
+  const todayAnswers = lastWeek.at(-1)!.answers;
   const plan = planToday(cards, schedules, folders, now, newPerDay);
   const open = plan.due.length + plan.fresh.length;
   const week = averageScore(log, now - 7 * DAY, now);
@@ -112,7 +65,6 @@ export default function StatsPage() {
   // Only cards that still exist: a deleted card's schedule is no longer work to do.
   const existing = new Set(cards.map((c) => c.id));
   const forecast = dueForecast([...schedules].filter(([id]) => existing.has(id)).map(([, schedule]) => schedule), now, 7);
-  const lastWeek = days.slice(-7);
 
   if (log.length === 0) {
     return (
@@ -177,19 +129,7 @@ export default function StatsPage() {
         </Link>
       )}
 
-      <section className="tile flex flex-col gap-4 p-5" aria-labelledby="calendar-heading">
-        <h2 id="calendar-heading" className={HEADING}>
-          Antworten pro Tag, letzte {WEEKS} Wochen
-        </h2>
-        <Calendar days={days} />
-        <p className="flex items-center gap-1.5 text-xs opacity-70">
-          Weniger
-          {["bg-base-300/60", "bg-primary/30", "bg-primary/50", "bg-primary/75", "bg-primary"].map((tone) => (
-            <span key={tone} className={`size-3 rounded-[3px] ${tone}`} aria-hidden />
-          ))}
-          Mehr
-        </p>
-      </section>
+      <ActivityCalendar />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="tile flex flex-col gap-4 p-5" aria-labelledby="week-heading">

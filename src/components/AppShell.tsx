@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { CalendarCheck, ChartNoAxesColumn, ChevronRight, CloudAlert, CloudCheck, Crown, Flame, House, Library, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings } from "lucide-react";
 import { AccountProvider, useAccount, useSyncState } from "@/components/Account";
+import { trackActiveTime } from "@/lib/activeTime";
 import { useAttemptLog, useFolders } from "@/lib/hooks";
 import { db } from "@/lib/db";
 import { cleanupImages } from "@/lib/images";
@@ -258,6 +259,10 @@ function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (inApp && anyCard !== undefined) void enableOffline(anyFolder, anyCard ?? undefined);
   }, [inApp, anyFolder, anyCard]);
+  // The time spent in the app counts towards the activity calendar.
+  useEffect(() => {
+    if (inApp) return trackActiveTime();
+  }, [inApp]);
   // Answers given without a network are graded as soon as there is one: on opening the app,
   // when the network returns and when the tab comes back.
   useEffect(() => {

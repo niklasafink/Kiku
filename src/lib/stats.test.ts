@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DAY, startOfDay } from "./srs";
-import { activity, averageScore, dueForecast, streakOf } from "./stats";
+import { activity, averageScore, dueForecast, levelOf, streakOf } from "./stats";
 
 const NOW = new Date(2026, 9, 10, 15, 0).getTime();
 const today = startOfDay(NOW);
@@ -34,6 +34,21 @@ describe("activity", () => {
     expect(days.map((d) => d.answers)).toEqual([0, 1, 0, 2]);
     expect(days.map((d) => d.average)).toEqual([null, 40, null, 71]);
     expect(days[3].day).toBe(today);
+  });
+});
+
+describe("levelOf", () => {
+  it("rates a day by its active time or its answers, whichever is higher", () => {
+    expect(levelOf({ answers: 0, seconds: 0 })).toBe(0);
+    expect(levelOf({ answers: 0, seconds: 45 * 60 })).toBe(2);
+    expect(levelOf({ answers: 0, seconds: 2 * 3600 })).toBe(4);
+    expect(levelOf({ answers: 60, seconds: 10 * 60 })).toBe(3);
+    expect(levelOf({ answers: 5, seconds: 90 * 60 })).toBe(3);
+  });
+
+  it("takes the active time into the day's entry", () => {
+    const days = activity([], NOW, 2, new Map([[today, 600]]));
+    expect(days.map((d) => d.seconds)).toEqual([0, 600]);
   });
 });
 

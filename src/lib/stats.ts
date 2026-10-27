@@ -51,10 +51,17 @@ export interface DayActivity {
   answers: number;
   /** Mean score of that day's answers, or null without any. */
   average: number | null;
+  /** Seconds spent actively in the app that day. */
+  seconds: number;
 }
 
 /** One entry per day for the last `days` days, oldest first, ending today. */
-export function activity(attempts: { createdAt: number; score: number }[], now: number, days: number): DayActivity[] {
+export function activity(
+  attempts: { createdAt: number; score: number }[],
+  now: number,
+  days: number,
+  activeSeconds: ReadonlyMap<number, number> = new Map(),
+): DayActivity[] {
   const byDay = new Map<number, { answers: number; sum: number }>();
   for (const attempt of attempts) {
     const day = dayOf(attempt.createdAt);
@@ -68,10 +75,28 @@ export function activity(attempts: { createdAt: number; score: number }[], now: 
   let day = dayOf(now);
   for (let i = 0; i < days; i++) {
     const entry = byDay.get(day);
-    result.unshift({ day, answers: entry?.answers ?? 0, average: entry ? Math.round(entry.sum / entry.answers) : null });
+    result.unshift({
+      day,
+      answers: entry?.answers ?? 0,
+      average: entry ? Math.round(entry.sum / entry.answers) : null,
+      seconds: activeSeconds.get(day) ?? 0,
+    });
     day = previousDay(day);
   }
   return result;
+}
+
+/** Minutes of active time from which a day reaches the levels 1 to 4; two hours a day is a lot. */
+export const MINUTE_LEVELS = [1, 30, 60, 120];
+/** Answers from which a day reaches the levels 1 to 4. */
+export const ANSWER_LEVELS = [1, 20, 50, 100];
+
+/** How much was learned on a day, 0 (nothing) to 4 (a lot): by time or by answers, whichever is higher. */
+export function levelOf(day: Pick<DayActivity, "answers" | "seconds">): number {
+  const minutes = day.seconds / 60;
+  const byTime = MINUTE_LEVELS.filter((min) => minutes >= min).length;
+  const byAnswers = ANSWER_LEVELS.filter((min) => day.answers >= min).length;
+  return Math.max(byTime, byAnswers);
 }
 
 /** Cards due per day for the coming days, starting today. Overdue cards count for today. */

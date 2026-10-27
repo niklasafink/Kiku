@@ -30,6 +30,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAccount } from "@/components/Account";
+import { ActivityCalendar } from "@/components/ActivityCalendar";
 import { Modal } from "@/components/Modal";
 import { PlanForm } from "@/components/PlanForm";
 import { useDocumentTitle } from "@/lib/hooks";
@@ -208,6 +209,7 @@ function Plans() {
     return (
       <div className="flex flex-col gap-5">
         <h1 className="text-2xl font-black">Lernplan erstellen</h1>
+        <ActivityCalendar />
         <div className="tile mx-auto w-full max-w-3xl p-5">
           <PlanForm replaces={false} onCreated={created} />
         </div>
@@ -221,7 +223,7 @@ function Plans() {
   const current = currentWeek(plan, today);
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <header className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="mr-auto text-2xl font-black">{plan.title}</h1>
@@ -243,6 +245,8 @@ function Plans() {
         </div>
         <Bar progress={total} className="h-3" />
       </header>
+
+      <ActivityCalendar />
 
       <Modal open={creating} onClose={() => setCreating(false)} title="Neuen Lernplan erstellen" wide>
         <PlanForm replaces onCreated={created} onClose={() => setCreating(false)} />
