@@ -50,7 +50,8 @@ export function CardImage({ id, alt, className = "" }: { id: string; alt?: strin
 
 /**
  * A picture in a card that opens over the whole screen when tapped, so diagrams with small print
- * can be read. Tapping the picture there switches between fitting the screen and 2.5 times as wide.
+ * can be read. Tapping the picture there switches between fitting the screen and 2.5 times as wide;
+ * tapping beside it closes it again.
  */
 export function ZoomableImage({ id, alt, className = "" }: { id: string; alt?: string; className?: string }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -69,6 +70,7 @@ export function ZoomableImage({ id, alt, className = "" }: { id: string; alt?: s
         type="button"
         className={`block max-w-full cursor-zoom-in ${className}`}
         aria-label="Bild vergrößern"
+        data-zoomable
         onClick={(event) => {
           // The card underneath may turn on a tap; this tap is only for the picture.
           event.stopPropagation();
@@ -82,7 +84,12 @@ export function ZoomableImage({ id, alt, className = "" }: { id: string; alt?: s
       {open &&
         createPortal(
           <dialog ref={ref} className="modal" onClose={() => setOpen(false)} onClick={(event) => event.stopPropagation()}>
-            <div className="modal-box flex h-dvh max-h-dvh w-full max-w-none flex-col gap-2 rounded-none p-2 sm:p-4">
+            <div
+              className="modal-box flex h-dvh max-h-dvh w-full max-w-none flex-col gap-2 rounded-none p-2 sm:p-4"
+              onClick={(event) => {
+                if (!(event.target as Element).closest("img, button")) setOpen(false);
+              }}
+            >
               <div className="flex items-center justify-end gap-1">
                 <button
                   type="button"
@@ -106,7 +113,8 @@ export function ZoomableImage({ id, alt, className = "" }: { id: string; alt?: s
                   type="button"
                   className={`block ${zoomed ? "w-[250%] max-w-none cursor-zoom-out" : "m-auto w-full cursor-zoom-in"}`}
                   aria-label={zoomed ? "Verkleinern" : "Vergrößern"}
-                  onClick={toggle}
+                  // The button is as wide as the screen; only the picture itself zooms, beside it closes.
+                  onClick={(event) => ((event.target as Element).closest("img") ? toggle() : setOpen(false))}
                 >
                   <CardImage
                     id={id}
