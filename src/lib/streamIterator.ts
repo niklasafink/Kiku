@@ -2,9 +2,10 @@
 // page (and in its worker to unpack compressed data). Without this, every PDF fails there with
 // "undefined is not a function". Imported for its side effect, before pdf.js runs.
 
-type IterableStream = ReadableStream & { [Symbol.asyncIterator]?: unknown; values?: unknown };
+// Only the two members this file sets; the DOM types declare them as always there.
+type IterableStream = { [Symbol.asyncIterator]?: unknown; values?: unknown };
 
-const proto = typeof ReadableStream === "undefined" ? null : (ReadableStream.prototype as IterableStream);
+const proto = typeof ReadableStream === "undefined" ? null : (ReadableStream.prototype as unknown as IterableStream);
 
 if (proto && !proto[Symbol.asyncIterator]) {
   async function* values(this: ReadableStream) {
