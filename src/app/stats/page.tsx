@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { CalendarDays, Flame, Target, TrendingUp } from "lucide-react";
 import { formatDate, pluralize } from "@/lib/format";
-import { useAllCards, useAttemptLog, useFolders, useSchedules } from "@/lib/hooks";
+import { useAllCards, useAttemptLog, useDocumentTitle, useFolders, useSchedules } from "@/lib/hooks";
 import { useNewPerDay } from "@/lib/settings";
 import { DAY, planToday } from "@/lib/srs";
 import { activity, averageScore, dueForecast, streakOf, type DayActivity } from "@/lib/stats";
@@ -92,6 +92,7 @@ function Bars({ items, label }: { items: { key: number; name: string; value: num
 }
 
 export default function StatsPage() {
+  useDocumentTitle("Statistik");
   const log = useAttemptLog();
   const cards = useAllCards();
   const folders = useFolders();

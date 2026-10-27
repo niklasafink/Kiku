@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "./db";
 import { sessionKey, STUDY_MODES } from "./repo";
@@ -78,4 +79,22 @@ export function useAttemptLog() {
 /** Answers given without a network that still wait to be graded; undefined while loading. */
 export function usePendingCount() {
   return useLiveQuery(() => db.pending.count(), []);
+}
+
+/**
+ * The browser tab's title while the page shows, e.g. the folder or card being viewed. Next writes
+ * the route's metadata title after a navigation, possibly after this effect, so it is put back.
+ */
+export function useDocumentTitle(title: string | null | undefined) {
+  useEffect(() => {
+    if (!title) return;
+    const wanted = `${title} | Kiku`;
+    const apply = () => {
+      if (document.title !== wanted) document.title = wanted;
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.head, { subtree: true, childList: true, characterData: true });
+    return () => observer.disconnect();
+  }, [title]);
 }

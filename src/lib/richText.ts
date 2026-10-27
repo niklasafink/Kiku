@@ -24,6 +24,8 @@ const IMAGE_ALL = new RegExp(IMAGE.source, "g");
 // A formula starts and ends at a non-space, so amounts of money ("5 $ oder 10 $") are left alone.
 const MATH_DISPLAY = "\\$\\$([^$\\n]+?)\\$\\$";
 const MATH = "\\$(\\S(?:[^$\\n]*?\\S)?)\\$";
+/** Inline code (left as it is) or a formula, display ($1) or inline ($2), within a line of card text. */
+export const CODE_OR_FORMULA = new RegExp(`\`[^\`\\n]+\`|${MATH_DISPLAY}|${MATH}`, "g");
 // Order matters: code and formulas first so their content is left alone, bold before italic.
 const INLINE = new RegExp(
   [

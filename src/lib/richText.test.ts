@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { imageIds, imageRefs, inkRef, isAttachmentAlt, joinPdfs, parseBlocks, parseInline, splitPdfs, toMarkdownTable, toPlainText } from "./richText";
+import { CODE_OR_FORMULA, imageIds, imageRefs, inkRef, isAttachmentAlt, joinPdfs, parseBlocks, parseInline, splitPdfs, toMarkdownTable, toPlainText } from "./richText";
 
 describe("parseBlocks", () => {
   it("keeps plain text as paragraphs with their line breaks", () => {
@@ -106,6 +106,17 @@ describe("formulas", () => {
 
   it("keeps the source of a formula in the plain text", () => {
     expect(toPlainText("Energie: $E = mc^2$\n$$\nF = ma\n$$")).toBe("Energie: E = mc^2\n\nF = ma");
+  });
+});
+
+describe("CODE_OR_FORMULA", () => {
+  it("finds inline and display formulas but leaves code and amounts of money alone", () => {
+    const found = [..."$a^2$ und $$c^2$$, `$x$`, 5 $ oder 10 $".matchAll(CODE_OR_FORMULA)].map((m) => [m[0], m[1] ?? m[2] ?? null]);
+    expect(found).toEqual([
+      ["$a^2$", "a^2"],
+      ["$$c^2$$", "c^2"],
+      ["`$x$`", null],
+    ]);
   });
 });
 

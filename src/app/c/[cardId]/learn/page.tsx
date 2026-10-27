@@ -6,10 +6,12 @@ import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { StudySession } from "@/components/StudySession";
 import { db } from "@/lib/db";
+import { useDocumentTitle } from "@/lib/hooks";
 import { cardSessionKey, loadSession } from "@/lib/repo";
 import type { SavedSession } from "@/lib/types";
 
 export default function CardLearnPage() {
+  useDocumentTitle("Lernen");
   const { cardId } = useParams<{ cardId: string }>();
   const card = useLiveQuery(async () => (await db.cards.get(cardId)) ?? null, [cardId]);
   const key = cardSessionKey(cardId);

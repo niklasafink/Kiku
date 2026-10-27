@@ -70,6 +70,13 @@ export function RichEditor(props: EditorProps) {
   const [chosen, setChosen] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "info" | "error"; text: string } | null>(null);
+  // A field that is emptied ("Speichern & weitere" starts the next card) drops the note about its PDF.
+  const empty = !props.value.trim();
+  const [wasEmpty, setWasEmpty] = useState(empty);
+  if (empty !== wasEmpty) {
+    setWasEmpty(empty);
+    if (empty) setNotice(null);
+  }
   const latest = useRef({ props, body, pdfs, inkId });
   useLayoutEffect(() => {
     latest.current = { props, body, pdfs, inkId };

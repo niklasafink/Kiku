@@ -62,6 +62,12 @@ async function sharedFolders(db: Database, token: string) {
   return { share, root, ids, folders: ids.map((id) => all.find((folder) => folder.id === id)!) };
 }
 
+/** Name of a shared deck for the page title and link previews, or null if the link does not exist (any more). */
+export async function sharedDeckName(db: Database, token: string): Promise<{ name: string; emoji: string } | null> {
+  const found = await sharedFolders(db, token);
+  return found && { name: found.root.name, emoji: found.root.emoji };
+}
+
 /** What the link shows, or null if it does not exist (any more). The star and other personal marks stay private. */
 export async function getSharedDeck(db: Database, token: string): Promise<SharedDeck | null> {
   const found = await sharedFolders(db, token);

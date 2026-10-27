@@ -21,7 +21,7 @@ export function Trend({ delta }: { delta: number }) {
   if (delta > 0) {
     return (
       <span className="inline-flex items-center gap-1 text-sm font-bold text-success">
-        <TrendingUp className="size-4" aria-hidden />+{delta}
+        <TrendingUp className="size-4" aria-hidden />+{delta} Pkt.
       </span>
     );
   }
@@ -29,13 +29,13 @@ export function Trend({ delta }: { delta: number }) {
     return (
       <span className="inline-flex items-center gap-1 text-sm font-bold text-error">
         <TrendingDown className="size-4" aria-hidden />
-        {delta}
+        {delta} Pkt.
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1 text-sm font-bold opacity-60">
-      <Minus className="size-4" aria-hidden />0
+      <Minus className="size-4" aria-hidden />0 Pkt.
     </span>
   );
 }

@@ -179,7 +179,9 @@ function UpgradeBanner() {
       href="/pricing"
       className="block h-8 truncate bg-primary px-4 text-center text-sm leading-8 font-semibold text-primary-content lg:sticky lg:top-0 lg:z-50"
     >
-      Pro: genauere KI-Auswertung und bessere Spracherkennung, ab 4,99 € im Monat.{" "}
+      {/* Short on phones, so "Upgraden" is not cut off. */}
+      <span className="sm:hidden">Pro: genauere KI-Auswertung ab 4,99 €.</span>
+      <span className="hidden sm:inline">Pro: genauere KI-Auswertung und bessere Spracherkennung, ab 4,99 € im Monat.</span>{" "}
       <span className="whitespace-nowrap underline">Upgraden</span>
     </Link>
   );

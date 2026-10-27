@@ -32,6 +32,7 @@ import {
 import { useAccount } from "@/components/Account";
 import { Modal } from "@/components/Modal";
 import { PlanForm } from "@/components/PlanForm";
+import { useDocumentTitle } from "@/lib/hooks";
 import { showToast } from "@/lib/toast";
 import {
   areaProgress,
@@ -114,6 +115,7 @@ function Bar({ progress, className = "" }: { progress: Progress; className?: str
 }
 
 export default function PlanPage() {
+  useDocumentTitle("Lernplan");
   // Plans are generated and stored on the server; the local-only app has neither.
   if (useAccount().mode === "local") {
     return (

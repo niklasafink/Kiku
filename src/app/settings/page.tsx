@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { downloadFile, fileName } from "@/lib/exportCards";
 import { storedImage } from "@/lib/images";
 import { buildMarkdownBackup } from "@/lib/markdownExport";
+import { useDocumentTitle } from "@/lib/hooks";
 import { exportAll, importAll } from "@/lib/repo";
 import { MAX_NEW_PER_DAY, setNewPerDay, useNewPerDay } from "@/lib/settings";
 import { NEW_PER_DAY } from "@/lib/srs";
@@ -41,6 +42,7 @@ function setTheme(theme: string) {
 }
 
 export default function SettingsPage() {
+  useDocumentTitle("Einstellungen");
   const theme = useSyncExternalStore(
     subscribe,
     () => localStorage.getItem("theme") ?? "",

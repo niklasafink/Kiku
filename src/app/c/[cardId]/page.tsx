@@ -14,7 +14,7 @@ import { StarButton, tagCounts, TagEditor } from "@/components/Tags";
 import { ScoreBadge, ScoreChart, Trend } from "@/components/score";
 import { db } from "@/lib/db";
 import { formatDateTime, inDays, pluralize } from "@/lib/format";
-import { useAllCards, useFolders } from "@/lib/hooks";
+import { useAllCards, useDocumentTitle, useFolders } from "@/lib/hooks";
 import { attemptsForCard, deleteAttempt, deleteCard, restoreDeleted, updateCard } from "@/lib/repo";
 import { showToast } from "@/lib/toast";
 import { pdfRefs, toPlainText } from "@/lib/richText";
@@ -259,6 +259,8 @@ export default function CardPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [now] = useState(() => Date.now());
   const preview = usePreviewing();
+  const question = card ? toPlainText(card.question).replace(/\s+/g, " ") : "";
+  useDocumentTitle(card === undefined ? null : question.length > 60 ? `${question.slice(0, 59)}…` : question || "Karte");
 
   if (card === undefined || !folders || !attempts || !allCards) {
     return <div className="skeleton h-64 w-full rounded-box" />;

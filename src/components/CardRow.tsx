@@ -2,14 +2,28 @@ import Link from "next/link";
 import { Image as ImageIcon } from "lucide-react";
 import { ScoreBadge } from "@/components/score";
 import { StarButton, TagList } from "@/components/Tags";
-import { imageRefs, isAttachmentAlt, toPlainText } from "@/lib/richText";
+import { Formula } from "@/components/RichText";
+import { CODE_OR_FORMULA, imageRefs, isAttachmentAlt, toPlainText } from "@/lib/richText";
 import type { Attempt, Card } from "@/lib/types";
 
 const FACE = "tile flex min-h-20 flex-col gap-1 px-4 py-3";
 const FACE_LABEL = "text-[0.68rem] font-extrabold tracking-wide uppercase opacity-50";
 
-/** The plain text of a card face, with list markers shown as bullets like on the card itself. */
-const preview = (text: string) => toPlainText(text).replace(/^(\s*)[-*+]\s+/gm, "$1• ");
+/**
+ * The plain text of a card face, with list markers shown as bullets like on the card itself and
+ * formulas typeset: they stand in for themselves as private-use markers while the rest turns plain.
+ */
+function Preview({ text }: { text: string }) {
+  const formulas: string[] = [];
+  const marked = text.replace(CODE_OR_FORMULA, (match, display?: string, inline?: string) =>
+    match.startsWith("`") ? match : `\uE000${formulas.push(display ?? inline ?? "") - 1}\uE001`,
+  );
+  const plain = toPlainText(marked).replace(/^(\s*)[-*+]\s+/gm, "$1• ");
+  if (formulas.length === 0) return plain;
+  return plain
+    .split(/\uE000(\d+)\uE001/)
+    .map((part, i) => (i % 2 ? <Formula key={i} tex={formulas[Number(part)]} display={false} /> : part));
+}
 
 /** The text shows a picture (a PDF attached to it does not count). */
 const hasPicture = (text: string) => imageRefs(text).some((ref) => !isAttachmentAlt(ref.alt));
@@ -52,7 +66,7 @@ export function CardRow({
             {!onToggle && <StarButton card={card} className="-my-1.5 -mr-2" />}
           </span>
         </span>
-        <span className="line-clamp-4 font-bold whitespace-pre-wrap">{preview(card.question)}</span>
+        <span className="line-clamp-4 font-bold whitespace-pre-wrap"><Preview text={card.question} /></span>
         {hasPicture(card.question) && <Picture />}
         <TagList card={card} />
       </span>
@@ -62,7 +76,7 @@ export function CardRow({
           className={`line-clamp-4 whitespace-pre-wrap transition-[filter] ${showSolution ? "" : "blur-[5px] select-none"}`}
           aria-hidden={!showSolution}
         >
-          {preview(card.solution)}
+          <Preview text={card.solution} />
         </span>
         {hasPicture(card.solution) && <Picture />}
       </span>

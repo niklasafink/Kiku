@@ -86,8 +86,13 @@ export function Formula({ tex, display }: { tex: string; display: boolean }) {
   const [html, setHtml] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
-    // Loaded on first use: most cards have no formulas.
-    katex ??= import("katex").then((module) => module.default);
+    // Loaded on first use: most cards have no formulas. Its two main fonts load first: they are
+    // declared with font-display: block, so the typeset formula would otherwise stay invisible meanwhile.
+    katex ??= Promise.all([
+      import("katex"),
+      document.fonts.load("1em KaTeX_Main").catch(() => null),
+      document.fonts.load("italic 1em KaTeX_Math").catch(() => null),
+    ]).then(([module]) => module.default);
     void katex.then((renderer) => {
       if (!active) return;
       try {

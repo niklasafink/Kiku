@@ -75,10 +75,10 @@ export default function SharedDeckPage() {
               </button>
             ) : (
               <>
-                <Link href="/auth/sign-up" className="btn btn-primary btn-chunky">
+                <Link href={`/auth/sign-up?next=${encodeURIComponent(`/s/${token}`)}`} className="btn btn-primary btn-chunky">
                   Kostenlos anmelden und dieses Deck lernen
                 </Link>
-                <span className="text-sm opacity-70">Nach der Anmeldung öffnest du diesen Link noch einmal und kopierst das Deck.</span>
+                <span className="text-sm opacity-70">Nach der Anmeldung kopierst du das Deck mit einem Klick in deine Bibliothek.</span>
               </>
             )}
             {progress && progress.total > 200 && (

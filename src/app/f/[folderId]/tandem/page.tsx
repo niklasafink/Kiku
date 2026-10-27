@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { TandemSession } from "@/components/TandemSession";
-import { useAllCards, useFolders } from "@/lib/hooks";
+import { useAllCards, useDocumentTitle, useFolders } from "@/lib/hooks";
 import { descendantIds } from "@/lib/tree";
 
 export default function FolderTandemPage() {
+  useDocumentTitle("Tandem");
   const { folderId } = useParams<{ folderId: string }>();
   const folders = useFolders();
   const allCards = useAllCards();

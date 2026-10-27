@@ -6,7 +6,7 @@ import { Suspense, useEffect, useState } from "react";
 import { Play, RotateCcw } from "lucide-react";
 import { StudySession } from "@/components/StudySession";
 import { formatDateTime } from "@/lib/format";
-import { useAllCards, useFolders, useLatestAttempts, useSchedules } from "@/lib/hooks";
+import { useAllCards, useDocumentTitle, useFolders, useLatestAttempts, useSchedules } from "@/lib/hooks";
 import { loadSession, sessionKey, type StudyMode } from "@/lib/repo";
 import { useNewPerDay } from "@/lib/settings";
 import { planToday } from "@/lib/srs";
@@ -82,12 +82,18 @@ function FolderSession({
       );
     }
 
-    const answered = savedCards.filter((c) => saved.states[c.id]?.attempt || saved.states[c.id]?.answer.trim() || saved.states[c.id]?.ink?.length).length;
+    const written = (c: { id: string }) => Boolean(saved.states[c.id]?.answer.trim() || saved.states[c.id]?.ink?.length);
+    // An exam grades at the end, so whatever is written counts; otherwise only answers handed in
+    // (graded, or waiting for a network) are answered, and a draft is only started.
+    const handedIn = (c: { id: string }) => Boolean(saved.states[c.id]?.attempt || saved.states[c.id]?.pending);
+    const answered = savedCards.filter((c) => (exam ? written(c) : handedIn(c))).length;
+    const started = exam ? 0 : savedCards.filter((c) => !handedIn(c) && written(c)).length;
     return (
       <div className="tile pop-in mx-auto flex w-full max-w-xl flex-col items-center gap-1.5 p-8 text-center">
         <h1 className="text-2xl font-black">{exam ? "Prüfung fortsetzen?" : "Weitermachen, wo du warst?"}</h1>
         <p>
           Karte {index + 1} von {savedCards.length}, {answered} beantwortet
+          {started > 0 && `, ${started} angefangen`}
         </p>
         <p className="text-sm opacity-70">Unterbrochen am {formatDateTime(saved.updatedAt)}</p>
         <div className="mt-4 flex flex-wrap justify-center gap-2.5">
@@ -150,6 +156,7 @@ function FolderLearn() {
 }
 
 export default function FolderLearnPage() {
+  useDocumentTitle("Lernen");
   return (
     <Suspense fallback={SKELETON}>
       <FolderLearn />

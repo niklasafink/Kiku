@@ -50,7 +50,7 @@ import { downloadFile, exportCards, fileName, type ExportFormat } from "@/lib/ex
 import { formatDate, inDays, pluralize } from "@/lib/format";
 import { storedImage } from "@/lib/images";
 import { buildMarkdownBackup } from "@/lib/markdownExport";
-import { useAllCards, useAttemptLog, useFolders, useLatestAttempts, useSavedSession, useSchedules } from "@/lib/hooks";
+import { useAllCards, useAttemptLog, useDocumentTitle, useFolders, useLatestAttempts, useSavedSession, useSchedules } from "@/lib/hooks";
 import { renderOcclusion } from "@/lib/occlusion";
 import {
   addTagToCards,
@@ -144,8 +144,17 @@ function StartMenu({ href, className, title, children }: { href: string; classNa
     function close(event: PointerEvent) {
       if (menu.current?.open && !menu.current.contains(event.target as Node)) menu.current.open = false;
     }
+    function escape(event: KeyboardEvent) {
+      if (event.key !== "Escape" || !menu.current?.open) return;
+      menu.current.open = false;
+      menu.current.querySelector("summary")?.focus();
+    }
     document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", escape);
+    };
   }, []);
   return (
     <details ref={menu} className="dropdown">
@@ -191,6 +200,8 @@ export function FolderView({ folderId }: { folderId: string | null }) {
     setDialog(null);
     setGenerateReviewing(false);
   };
+
+  useDocumentTitle(folderId ? folders?.find((f) => f.id === folderId)?.name : "Bibliothek");
 
   if (!folders || !allCards || !latest || !schedules) {
     return <div className="skeleton h-40 w-full rounded-box" />;
@@ -760,7 +771,7 @@ function ExportChoice({
       </p>
       <button className={option} onClick={() => onChoose("csv")}>
         <span className="font-extrabold">Tabelle (.csv)</span>
-        <span className="text-sm opacity-70">Für Excel, Numbers und Google Tabellen. Mit einer Spalte für den Ordner.</span>
+        <span className="text-sm opacity-70">Für Excel, Numbers und Google Tabellen. Mit Unterordnern kommt eine Spalte für den Ordner dazu.</span>
       </button>
       <button
         className={option}

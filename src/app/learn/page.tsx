@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { StudySession } from "@/components/StudySession";
-import { useAllCards, useFolders, useSchedules } from "@/lib/hooks";
+import { useAllCards, useDocumentTitle, useFolders, useSchedules } from "@/lib/hooks";
 import { learnSessionKey, loadSession } from "@/lib/repo";
 import { useNewPerDay } from "@/lib/settings";
 import { planToday } from "@/lib/srs";
@@ -87,6 +87,7 @@ function Learn() {
 }
 
 export default function LearnPage() {
+  useDocumentTitle("Heute lernen");
   return (
     <Suspense fallback={SKELETON}>
       <Learn />

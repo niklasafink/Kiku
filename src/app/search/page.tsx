@@ -6,10 +6,11 @@ import { Play, Search } from "lucide-react";
 import { CardRow } from "@/components/CardRow";
 import { tagCounts, TagFilter } from "@/components/Tags";
 import { pluralize } from "@/lib/format";
-import { useAllCards, useFolders, useLatestAttempts } from "@/lib/hooks";
+import { useAllCards, useDocumentTitle, useFolders, useLatestAttempts } from "@/lib/hooks";
 import { pathTo } from "@/lib/tree";
 
 export default function SearchPage() {
+  useDocumentTitle("Suche");
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState<string | null>(null);
   const folders = useFolders();
