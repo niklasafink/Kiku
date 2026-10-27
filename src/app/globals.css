@@ -93,6 +93,18 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Taps act at once: Safari on iPad otherwise waits whether a second tap follows to zoom. Pinching still zooms. */
+a,
+button,
+label,
+input,
+select,
+textarea,
+summary,
+[role="button"] {
+  touch-action: manipulation;
+}
+
 /* iOS zooms into fields with text below 16px; keep them at 16px on touch devices. */
 @media (pointer: coarse) {
   input,

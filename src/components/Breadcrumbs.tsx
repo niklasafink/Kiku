@@ -14,10 +14,10 @@ export function Breadcrumbs({ folders, folderId }: { folders: Folder[]; folderId
     <div className="flex max-w-full items-center gap-1">
       <Link
         href={parent ? `/f/${parent.id}` : "/"}
-        className="btn btn-ghost btn-sm btn-square -ml-2 shrink-0"
+        className="btn btn-ghost btn-square -ml-2 size-11 shrink-0 pointer-coarse:size-12"
         aria-label={`Zurück zu ${parent ? parent.name : "Bibliothek"}`}
       >
-        <ArrowLeft className="size-5" />
+        <ArrowLeft className="size-6" />
       </Link>
       <nav aria-label="Pfad" className="breadcrumbs min-w-0 py-0 text-sm font-semibold opacity-70">
         <ul>

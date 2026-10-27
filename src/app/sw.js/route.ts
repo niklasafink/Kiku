@@ -91,6 +91,16 @@ self.addEventListener("fetch", (event) => {
     const cache = await caches.open(CACHE);
     const kind = kindOf(request);
     const key = keyOf(url, kind);
+    // Opening a folder or card in the app: the router's payload is the same for every id and the
+    // content comes from the device, so the stored one answers at once instead of waiting for the
+    // server, and a fresh copy is stored behind it. Whole documents still come from the network.
+    if (kind !== "doc" && PATTERNS.some((p) => p.test(url.pathname))) {
+      const stored = (await cache.match(key, { ignoreVary: true })) || (await fromSibling(cache, url, kind));
+      if (stored) {
+        event.waitUntil(fetch(request).then((response) => remember(cache, key, response)).catch(() => {}));
+        return stored;
+      }
+    }
     try {
       const response = await fetch(request);
       event.waitUntil(remember(cache, key, response.clone()).catch(() => {}));

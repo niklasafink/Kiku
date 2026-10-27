@@ -24,6 +24,11 @@ const nextConfig: NextConfig = {
       },
     },
   },
+  // Folder, card and study pages render on the device from its own database; what the server sends
+  // for them never changes within a deployment, so a page visited once opens again without asking.
+  experimental: {
+    staleTimes: { dynamic: 300 },
+  },
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
