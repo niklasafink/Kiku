@@ -9,6 +9,7 @@ import { GradedSolution, GradeLegend } from "@/components/GradedSolution";
 import { Handwriting } from "@/components/Handwriting";
 import { NormReport } from "@/components/NormReport";
 import { PdfViewer } from "@/components/PdfViewer";
+import { Pomodoro } from "@/components/Pomodoro";
 import { Recorder } from "@/components/Recorder";
 import { RichText } from "@/components/RichText";
 import { BarSlot } from "@/components/AppShell";
@@ -676,6 +677,7 @@ export function StudySession({
           <Shuffle className="size-4" />
         </button>
       )}
+      <Pomodoro />
 
       {inputShown && (
         <>
