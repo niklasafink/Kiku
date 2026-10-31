@@ -65,6 +65,7 @@ function ring(audio: AudioContext | null) {
 export function Pomodoro() {
   const [timer, setTimer] = useState<Stored>(stored);
   const [now, setNow] = useState(() => Date.now());
+  const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   // Created on the tap that starts the timer, since browsers only allow sound after one.
@@ -113,22 +114,39 @@ export function Pomodoro() {
     panel.current?.hidePopover();
   }
 
-  // The bar scrolls sideways on tablets, so the panel is a popover in the top layer, placed under the button.
+  // The bar scrolls sideways on tablets, so the list is a popover in the top layer, hung right under
+  // the button with the same width, so that both read as one piece.
   function place() {
     const box = button.current?.getBoundingClientRect();
     const el = panel.current;
     if (!box || !el) return;
-    el.style.top = `${box.bottom + 6}px`;
-    el.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - el.offsetWidth - 8))}px`;
+    el.style.top = `${box.bottom - 1}px`;
+    el.style.left = `${box.left}px`;
+    el.style.width = `${box.width}px`;
   }
+
+  // Follows the button while the bar scrolls or the window changes size.
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
 
   return (
     <>
       <button
         ref={button}
         popoverTarget={id}
-        className={`btn btn-xs shrink-0 px-1.5 font-bold tabular-nums ${done ? "btn-warning animate-pulse" : running ? "btn-ghost" : "btn-ghost text-base-content/70"}`}
+        onClick={place}
+        className={`btn btn-xs w-14 shrink-0 px-0 font-bold tabular-nums ${
+          open ? "rounded-b-none border-base-300 border-b-transparent bg-base-100 shadow-none" : done ? "btn-warning animate-pulse" : "btn-ghost"
+        } ${running || done ? "" : "text-base-content/70"}`}
         aria-label={running ? `Lerntimer, noch ${clock(left ?? 0)}` : done ? "Lerntimer abgelaufen" : `Lerntimer, ${timer.minutes} Minuten`}
+        aria-expanded={open}
         title={done ? "Zeit ist um" : "Lerntimer"}
       >
         {running ? clock(left ?? 0) : done ? "0:00" : `${timer.minutes} min`}
@@ -137,32 +155,34 @@ export function Pomodoro() {
         ref={panel}
         id={id}
         popover="auto"
-        onToggle={(event) => event.newState === "open" && place()}
-        className="fixed inset-auto m-0 rounded-box border border-base-300 bg-base-100 p-1.5 text-base-content shadow-lg"
+        onToggle={(event) => {
+          setOpen(event.newState === "open");
+          if (event.newState === "open") place();
+        }}
+        className="fixed inset-auto m-0 flex-col gap-0.5 rounded-b-field border border-t-0 border-base-300 bg-base-100 p-0.5 text-base-content shadow-md [&:popover-open]:flex"
       >
-        <div className="flex items-center gap-1">
-          {PRESETS.map((minutes) => (
-            <button
-              key={minutes}
-              className={`btn btn-xs px-2 tabular-nums ${timer.minutes === minutes ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => start(minutes)}
-              title={`${minutes} Minuten starten`}
-            >
-              {minutes}
-            </button>
-          ))}
-          {timer.endsAt !== null && (
-            <>
-              <span className="mx-0.5 h-4 w-px bg-base-300" aria-hidden />
-              <button className="btn btn-xs btn-square btn-ghost" onClick={() => start(timer.minutes)} title={`Neu starten mit ${timer.minutes} Minuten`} aria-label="Neu starten">
+        {PRESETS.map((minutes) => (
+          <button
+            key={minutes}
+            className={`btn btn-xs w-full px-0 font-bold tabular-nums ${running && timer.minutes === minutes ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => start(minutes)}
+            title={`${minutes} Minuten starten`}
+          >
+            {minutes} min
+          </button>
+        ))}
+        {timer.endsAt !== null && (
+          <div className="flex">
+            {running && (
+              <button className="btn btn-xs btn-ghost flex-1 px-0" onClick={() => start(timer.minutes)} title={`Neu starten mit ${timer.minutes} Minuten`} aria-label="Neu starten">
                 <RotateCcw className="size-3.5" />
               </button>
-              <button className="btn btn-xs btn-square btn-ghost" onClick={stop} title="Timer beenden" aria-label="Timer beenden">
-                <Square className="size-3.5" />
-              </button>
-            </>
-          )}
-        </div>
+            )}
+            <button className="btn btn-xs btn-ghost flex-1 px-0" onClick={stop} title="Timer beenden" aria-label="Timer beenden">
+              <Square className="size-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     </>
   );
