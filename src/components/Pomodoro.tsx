@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
-import { RotateCcw, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Play, Square } from "lucide-react";
 
 const PRESETS = [15, 30, 45, 60];
 const KEY = "kiku-pomodoro";
@@ -59,23 +60,24 @@ function ring(audio: AudioContext | null) {
 }
 
 /**
- * A study timer over the whole session, not per card: the length in the bar, a tap opens the
- * usual lengths and, while it runs, a reset that starts it over.
+ * A study timer over the whole session, not per card: only the length in the bar. A tap opens a
+ * small row under it with the usual lengths and a start button, and while it runs a stop button.
  */
 export function Pomodoro() {
   const [timer, setTimer] = useState<Stored>(stored);
   const [now, setNow] = useState(() => Date.now());
-  const [open, setOpen] = useState(false);
+  const [choice, setChoice] = useState(timer.minutes);
+  const [place, setPlace] = useState<{ top: number; right: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   // Created on the tap that starts the timer, since browsers only allow sound after one.
   const audio = useRef<AudioContext | null>(null);
   const rang = useRef(false);
-  const id = useId();
 
   const left = timer.endsAt === null ? null : timer.endsAt - now;
   const running = left !== null && left > 0;
   const done = left !== null && left <= 0;
+  const open = place !== null;
 
   useEffect(() => {
     if (timer.endsAt === null) return;
@@ -89,6 +91,32 @@ export function Pomodoro() {
       ring(audio.current);
     }
   }, [done]);
+
+  // The bar scrolls sideways on tablets and would cut a dropdown off, so the row is drawn over the
+  // page (portal) at the button's spot, right-aligned to it. Not a popover: older iPads lack those.
+  function measure() {
+    const box = button.current?.getBoundingClientRect();
+    if (box) setPlace({ top: box.bottom + 4, right: Math.max(8, window.innerWidth - box.right) });
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!panel.current?.contains(target) && !button.current?.contains(target)) setPlace(null);
+    };
+    const escape = (event: KeyboardEvent) => event.key === "Escape" && setPlace(null);
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
+  }, [open]);
 
   function update(next: Stored) {
     setTimer(next);
@@ -106,84 +134,61 @@ export function Pomodoro() {
     const endsAt = endIn(minutes);
     setNow(endsAt - minutes * 60_000);
     update({ minutes, endsAt });
-    panel.current?.hidePopover();
+    setPlace(null);
   }
 
   function stop() {
     update({ ...timer, endsAt: null });
-    panel.current?.hidePopover();
+    setPlace(null);
   }
-
-  // The bar scrolls sideways on tablets, so the list is a popover in the top layer, hung right under
-  // the button with the same width, so that both read as one piece.
-  function place() {
-    const box = button.current?.getBoundingClientRect();
-    const el = panel.current;
-    if (!box || !el) return;
-    el.style.top = `${box.bottom - 1}px`;
-    el.style.left = `${box.left}px`;
-    el.style.width = `${box.width}px`;
-  }
-
-  // Follows the button while the bar scrolls or the window changes size.
-  useEffect(() => {
-    if (!open) return;
-    window.addEventListener("scroll", place, true);
-    window.addEventListener("resize", place);
-    return () => {
-      window.removeEventListener("scroll", place, true);
-      window.removeEventListener("resize", place);
-    };
-  }, [open]);
 
   return (
     <>
       <button
         ref={button}
-        popoverTarget={id}
-        onClick={place}
-        className={`btn btn-xs w-14 shrink-0 px-0 font-bold tabular-nums ${
-          open ? "rounded-b-none border-base-300 border-b-transparent bg-base-100 shadow-none" : done ? "btn-warning animate-pulse" : "btn-ghost"
-        } ${running || done ? "" : "text-base-content/70"}`}
+        onClick={() => {
+          if (open) return setPlace(null);
+          setChoice(timer.minutes);
+          measure();
+        }}
+        className={`btn btn-xs shrink-0 px-1.5 font-bold tabular-nums ${done ? "btn-warning animate-pulse" : open ? "btn-active" : "btn-ghost"} ${running || done ? "" : "text-base-content/70"}`}
         aria-label={running ? `Lerntimer, noch ${clock(left ?? 0)}` : done ? "Lerntimer abgelaufen" : `Lerntimer, ${timer.minutes} Minuten`}
         aria-expanded={open}
+        aria-haspopup="true"
         title={done ? "Zeit ist um" : "Lerntimer"}
       >
         {running ? clock(left ?? 0) : done ? "0:00" : `${timer.minutes} min`}
       </button>
-      <div
-        ref={panel}
-        id={id}
-        popover="auto"
-        onToggle={(event) => {
-          setOpen(event.newState === "open");
-          if (event.newState === "open") place();
-        }}
-        className="fixed inset-auto m-0 flex-col gap-0.5 rounded-b-field border border-t-0 border-base-300 bg-base-100 p-0.5 text-base-content shadow-md [&:popover-open]:flex"
-      >
-        {PRESETS.map((minutes) => (
-          <button
-            key={minutes}
-            className={`btn btn-xs w-full px-0 font-bold tabular-nums ${running && timer.minutes === minutes ? "btn-primary" : "btn-ghost"}`}
-            onClick={() => start(minutes)}
-            title={`${minutes} Minuten starten`}
+      {place &&
+        createPortal(
+          <div
+            ref={panel}
+            role="group"
+            aria-label="Lerntimer"
+            style={{ top: place.top, right: place.right }}
+            className="fixed z-50 flex items-center gap-1 rounded-field border border-base-content/15 bg-base-100 p-1 text-base-content shadow-xl"
           >
-            {minutes} min
-          </button>
-        ))}
-        {timer.endsAt !== null && (
-          <div className="flex">
-            {running && (
-              <button className="btn btn-xs btn-ghost flex-1 px-0" onClick={() => start(timer.minutes)} title={`Neu starten mit ${timer.minutes} Minuten`} aria-label="Neu starten">
-                <RotateCcw className="size-3.5" />
+            {PRESETS.map((minutes) => (
+              <button
+                key={minutes}
+                className={`btn btn-xs px-1.5 font-bold tabular-nums btn-ghost ${choice === minutes ? "bg-base-content/15" : ""}`}
+                aria-pressed={choice === minutes}
+                onClick={() => setChoice(minutes)}
+              >
+                {minutes}
+              </button>
+            ))}
+            <button className="btn btn-primary btn-xs px-2 font-bold" onClick={() => start(choice)} title={`${choice} Minuten starten`}>
+              <Play className="size-3" /> {running ? "Neu" : "Start"}
+            </button>
+            {timer.endsAt !== null && (
+              <button className="btn btn-xs btn-square btn-ghost" onClick={stop} title="Timer beenden" aria-label="Timer beenden">
+                <Square className="size-3" />
               </button>
             )}
-            <button className="btn btn-xs btn-ghost flex-1 px-0" onClick={stop} title="Timer beenden" aria-label="Timer beenden">
-              <Square className="size-3.5" />
-            </button>
-          </div>
+          </div>,
+          document.body,
         )}
-      </div>
     </>
   );
 }
