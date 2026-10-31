@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { RotateCcw, Square, Timer } from "lucide-react";
+import { RotateCcw, Square } from "lucide-react";
 
 const PRESETS = [15, 30, 45, 60];
 const KEY = "kiku-pomodoro";
-const MAX_MINUTES = 600;
 
 /** The end is stored, not the time left, so the timer runs on while the page is closed or another session is open. */
 type Stored = { minutes: number; endsAt: number | null };
@@ -17,7 +16,7 @@ function stored(): Stored {
   } catch {
     // Nothing stored yet, or private browsing.
   }
-  return { minutes: 30, endsAt: null };
+  return { minutes: 60, endsAt: null };
 }
 
 function store(value: Stored) {
@@ -26,6 +25,11 @@ function store(value: Stored) {
   } catch {
     // Private browsing: the timer just ends with the page.
   }
+}
+
+/** Only called from taps; outside the component, since the React linter takes it for a call during render. */
+function endIn(minutes: number) {
+  return Date.now() + minutes * 60_000;
 }
 
 function clock(ms: number) {
@@ -55,13 +59,12 @@ function ring(audio: AudioContext | null) {
 }
 
 /**
- * A study timer over the whole session, not per card: a small clock in the bar that opens a
- * picker with the usual lengths, a field for any other, and a reset that starts it over.
+ * A study timer over the whole session, not per card: the length in the bar, a tap opens the
+ * usual lengths and, while it runs, a reset that starts it over.
  */
 export function Pomodoro() {
   const [timer, setTimer] = useState<Stored>(stored);
   const [now, setNow] = useState(() => Date.now());
-  const [custom, setCustom] = useState("");
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   // Created on the tap that starts the timer, since browsers only allow sound after one.
@@ -93,16 +96,15 @@ export function Pomodoro() {
 
   function start(minutes: number) {
     if (!(minutes > 0)) return;
-    minutes = Math.min(MAX_MINUTES, Math.round(minutes));
     try {
       audio.current ??= new AudioContext();
     } catch {
       // Without Web Audio the end is only shown.
     }
     rang.current = false;
-    setNow(Date.now());
-    update({ minutes, endsAt: Date.now() + minutes * 60_000 });
-    setCustom("");
+    const endsAt = endIn(minutes);
+    setNow(endsAt - minutes * 60_000);
+    update({ minutes, endsAt });
     panel.current?.hidePopover();
   }
 
@@ -125,61 +127,42 @@ export function Pomodoro() {
       <button
         ref={button}
         popoverTarget={id}
-        className={`btn btn-sm shrink-0 ${timer.endsAt === null ? "btn-ghost btn-square" : done ? "btn-warning animate-pulse px-2" : "btn-ghost px-2 font-extrabold tabular-nums"}`}
-        aria-label={timer.endsAt === null ? "Lerntimer" : done ? "Lerntimer abgelaufen" : `Lerntimer, noch ${clock(left ?? 0)}`}
-        title={timer.endsAt === null ? "Lerntimer (Pomodoro)" : done ? "Zeit ist um" : "Lerntimer"}
+        className={`btn btn-xs shrink-0 px-1.5 font-bold tabular-nums ${done ? "btn-warning animate-pulse" : running ? "btn-ghost" : "btn-ghost text-base-content/70"}`}
+        aria-label={running ? `Lerntimer, noch ${clock(left ?? 0)}` : done ? "Lerntimer abgelaufen" : `Lerntimer, ${timer.minutes} Minuten`}
+        title={done ? "Zeit ist um" : "Lerntimer"}
       >
-        {timer.endsAt === null ? <Timer className="size-4" /> : done ? "0:00" : clock(left ?? 0)}
+        {running ? clock(left ?? 0) : done ? "0:00" : `${timer.minutes} min`}
       </button>
       <div
         ref={panel}
         id={id}
         popover="auto"
         onToggle={(event) => event.newState === "open" && place()}
-        className="fixed inset-auto m-0 w-64 rounded-box border-2 border-base-300 bg-base-100 p-3 text-base-content shadow-lg"
+        className="fixed inset-auto m-0 rounded-box border border-base-300 bg-base-100 p-1.5 text-base-content shadow-lg"
       >
-        {timer.endsAt !== null && (
-          <div className="mb-3 flex items-center gap-2">
-            <span className="flex-1 text-sm font-semibold">
-              {done ? "Zeit ist um." : `Noch ${clock(left ?? 0)} von ${timer.minutes} Min.`}
-            </span>
-            <button className="btn btn-sm btn-square bg-base-100" onClick={() => start(timer.minutes)} title={`Neu starten mit ${timer.minutes} Minuten`} aria-label="Neu starten">
-              <RotateCcw className="size-4" />
-            </button>
-            <button className="btn btn-sm btn-square bg-base-100" onClick={stop} title="Timer beenden" aria-label="Timer beenden">
-              <Square className="size-4" />
-            </button>
-          </div>
-        )}
-        <div className="join w-full">
+        <div className="flex items-center gap-1">
           {PRESETS.map((minutes) => (
-            <button key={minutes} className={`btn join-item btn-sm flex-1 ${running && timer.minutes === minutes ? "btn-primary" : "bg-base-100"}`} onClick={() => start(minutes)}>
+            <button
+              key={minutes}
+              className={`btn btn-xs px-2 tabular-nums ${timer.minutes === minutes ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => start(minutes)}
+              title={`${minutes} Minuten starten`}
+            >
               {minutes}
             </button>
           ))}
+          {timer.endsAt !== null && (
+            <>
+              <span className="mx-0.5 h-4 w-px bg-base-300" aria-hidden />
+              <button className="btn btn-xs btn-square btn-ghost" onClick={() => start(timer.minutes)} title={`Neu starten mit ${timer.minutes} Minuten`} aria-label="Neu starten">
+                <RotateCcw className="size-3.5" />
+              </button>
+              <button className="btn btn-xs btn-square btn-ghost" onClick={stop} title="Timer beenden" aria-label="Timer beenden">
+                <Square className="size-3.5" />
+              </button>
+            </>
+          )}
         </div>
-        <form
-          className="mt-2 flex gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            start(Number(custom));
-          }}
-        >
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={MAX_MINUTES}
-            value={custom}
-            onChange={(event) => setCustom(event.target.value)}
-            placeholder="Minuten"
-            aria-label="Eigene Dauer in Minuten"
-            className="input input-sm min-w-0 flex-1"
-          />
-          <button className="btn btn-primary btn-sm" disabled={!(Number(custom) > 0)}>
-            Start
-          </button>
-        </form>
       </div>
     </>
   );
