@@ -19,12 +19,30 @@ const MAX_ZOOM = 5;
 const STEP = 1.25;
 /** Space around the pages inside the reader. */
 const GUTTER = 12;
+/** Space between the pages (gap-3). */
+const GAP = 12;
+/** How far a pinch must go past the page width before it lets go of it (on the scale of ln(zoom), about 9 %). */
+const DETENT = 0.09;
 /** A canvas never gets more pixels than this (browsers refuse or crash beyond roughly 16 million). */
 const MAX_PIXELS = 14_000_000;
 /** After the last zoom change the pages are redrawn sharp; until then they are stretched. */
 const REDRAW_DELAY = 160;
 
 const clampZoom = (zoom: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+const clamp = (value: number, max: number) => Math.min(Math.max(0, max), Math.max(0, value));
+
+/**
+ * The zoom of a pinch that began at `start` and has the fingers `ratio` times as far apart: it follows
+ * the fingers, but holds at the page width (zoom 1) while they move through a stretch of DETENT on each
+ * side of it, so the page fits the reader exactly without aiming for it.
+ */
+function pinchZoom(start: number, ratio: number) {
+  const from = Math.log(start);
+  const raw = from + Math.log(ratio);
+  // The stretch that holds lies beyond the page width, seen from where the pinch began.
+  const [low, high] = Math.abs(from) < 1e-6 ? [-DETENT, DETENT] : from > 0 ? [-2 * DETENT, 0] : [0, 2 * DETENT];
+  return clampZoom(Math.exp(raw > high ? raw - high : raw < low ? raw - low : 0));
+}
 
 /** A place outside the reader for its tools for marking, e.g. next to the tabs of the study window. */
 export const ToolSlot = createContext<HTMLElement | null>(null);
@@ -254,8 +272,11 @@ export function PdfViewer({
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   // The same element for code that moves its scroll position (state may not be modified).
   const scrollerRef = useRef<HTMLDivElement | null>(null);
-  // The point of the content that stays under the finger or cursor while zooming.
-  const anchor = useRef<{ x: number; y: number; from: number } | null>(null);
+  // The point of a page that stays under the finger or cursor while zooming: the page, where on it (in shares
+  // of it), and where in the reader.
+  const anchor = useRef<{ page: number; fx: number; fy: number; x: number; y: number } | null>(null);
+  // The column of pages, scaled as a picture while two fingers pinch.
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const zoomRef = useRef(zoom);
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -418,6 +439,26 @@ export function PdfViewer({
   const drawWidth = Math.max(0, (viewWidth - GUTTER * 2) * drawZoom);
   const first = sizes[1] ?? { width: 595, height: 842 };
 
+  /** The page under the point (x, y) of the reader, and where on it that point is. */
+  const pointOn = useCallback((x: number, y: number) => {
+    const element = scrollerRef.current;
+    if (!element) return null;
+    const top = element.scrollTop + y;
+    let found: HTMLElement | null = null;
+    for (const page of element.querySelectorAll<HTMLElement>("[data-page]")) {
+      found = page;
+      if (page.offsetTop + page.offsetHeight + GAP / 2 >= top) break;
+    }
+    if (!found || found.offsetWidth === 0 || found.offsetHeight === 0) return null;
+    return {
+      page: Number(found.dataset.page),
+      fx: (element.scrollLeft + x - found.offsetLeft) / found.offsetWidth,
+      fy: (top - found.offsetTop) / found.offsetHeight,
+      x,
+      y,
+    };
+  }, []);
+
   /** Zooms to a level, keeping the point (x, y) of the reader where it is. */
   const zoomTo = useCallback(
     (target: number, point?: { x: number; y: number }) => {
@@ -426,24 +467,27 @@ export function PdfViewer({
       if (next === from || !scroller) return;
       const rect = scroller.getBoundingClientRect();
       // Without a point (the buttons) the top line stays where it is, which is what a reader follows.
-      anchor.current = { x: point?.x ?? rect.width / 2, y: point?.y ?? 24, from };
+      anchor.current = pointOn(point?.x ?? rect.width / 2, point?.y ?? 24);
       zoomRef.current = next;
       setZoom(next);
       if (settle.current) clearTimeout(settle.current);
       settle.current = setTimeout(() => setDrawZoom(zoomRef.current), REDRAW_DELAY);
     },
-    [scroller],
+    [scroller, pointOn],
   );
 
-  // After the pages changed size, scroll so the anchored point is still under the cursor.
+  // After the pages changed size, scroll so the anchored point is still under the cursor, and drop the
+  // picture of a pinch in the same frame.
   useLayoutEffect(() => {
     const move = anchor.current;
     const element = scrollerRef.current;
+    if (contentRef.current) contentRef.current.style.transform = "";
     if (!move || !element) return;
     anchor.current = null;
-    const ratio = zoom / move.from;
-    element.scrollLeft = (element.scrollLeft + move.x) * ratio - move.x;
-    element.scrollTop = (element.scrollTop + move.y) * ratio - move.y;
+    const page = element.querySelector<HTMLElement>(`[data-page="${move.page}"]`);
+    if (!page) return;
+    element.scrollLeft = page.offsetLeft + move.fx * page.offsetWidth - move.x;
+    element.scrollTop = page.offsetTop + move.fy * page.offsetHeight - move.y;
   }, [zoom]);
 
   useEffect(() => () => void (settle.current && clearTimeout(settle.current)), []);
@@ -464,43 +508,116 @@ export function PdfViewer({
     return () => scroller.removeEventListener("wheel", onWheel);
   }, [scroller, zoomTo]);
 
-  // Pinch with two fingers; one finger scrolls as usual (touch-action allows it).
+  // Pinch with two fingers; one finger scrolls as usual (touch-action allows it). While the fingers move,
+  // the pages are only scaled as a picture (cheap, in step with the fingers); on letting go they are laid
+  // out at the new size and drawn sharp. Touch events, not pointer events: iPadOS cancels the pointers of a
+  // second finger once it decides to scroll, and touch events also work on older iPads.
   useEffect(() => {
     if (!scroller) return;
-    const pointers = new Map<number, { x: number; y: number }>();
-    let start: { distance: number; zoom: number } | null = null;
-    const distance = () => {
-      const [a, b] = [...pointers.values()];
-      return Math.hypot(a.x - b.x, a.y - b.y);
-    };
-    const down = (event: PointerEvent) => {
-      if (event.pointerType !== "touch") return;
-      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (pointers.size === 2) start = { distance: distance(), zoom: zoomRef.current };
-    };
-    const move = (event: PointerEvent) => {
-      if (!pointers.has(event.pointerId)) return;
-      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (pointers.size !== 2 || !start || start.distance < 10) return;
-      const [a, b] = [...pointers.values()];
+    let pinch: {
+      distance: number;
+      zoom: number;
+      anchor: { page: number; fx: number; fy: number };
+      page: HTMLElement;
+      /** Where the pinch would leave the reader: zoom and the point of the reader the anchor goes to. */
+      next: number;
+      x: number;
+      y: number;
+    } | null = null;
+    let frame = 0;
+    const local = (touches: TouchList) => {
       const rect = scroller.getBoundingClientRect();
-      zoomTo(start.zoom * (distance() / start.distance), { x: (a.x + b.x) / 2 - rect.left, y: (a.y + b.y) / 2 - rect.top });
+      const [a, b] = [touches[0], touches[1]];
+      return {
+        x: (a.clientX + b.clientX) / 2 - rect.left,
+        y: (a.clientY + b.clientY) / 2 - rect.top,
+        distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+      };
     };
-    const up = (event: PointerEvent) => {
-      pointers.delete(event.pointerId);
-      start = null;
+    // Lays the picture of the pages where they will be once the zoom is taken over, so letting go changes nothing to the eye.
+    const paint = () => {
+      frame = 0;
+      const content = contentRef.current;
+      if (!pinch || !content) return;
+      const { page, anchor: at, x, y } = pinch;
+      const ratio = pinch.next / zoomRef.current;
+      const number = at.page;
+      const width = page.offsetWidth * ratio;
+      const height = page.offsetHeight * ratio;
+      const column = Math.max(width + GUTTER * 2, scroller.clientWidth);
+      const left = GUTTER + (column - GUTTER * 2 - width) / 2;
+      // Gaps and gutters keep their size; only the pages grow.
+      const top = GUTTER + (page.offsetTop - GUTTER - GAP * (number - 1)) * ratio + GAP * (number - 1);
+      const count = content.querySelectorAll("[data-page]").length;
+      const total = GUTTER * 2 + (content.offsetHeight - GUTTER * 2 - GAP * (count - 1)) * ratio + GAP * (count - 1);
+      const scrollLeft = clamp(left + at.fx * width - x, column - scroller.clientWidth);
+      const scrollTop = clamp(top + at.fy * height - y, total - scroller.clientHeight);
+      const dx = left - scrollLeft + scroller.scrollLeft - page.offsetLeft * ratio;
+      const dy = top - scrollTop + scroller.scrollTop - page.offsetTop * ratio;
+      content.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(${ratio})`;
     };
-    scroller.addEventListener("pointerdown", down);
-    scroller.addEventListener("pointermove", move);
-    scroller.addEventListener("pointerup", up);
-    scroller.addEventListener("pointercancel", up);
+    const begin = (event: TouchEvent) => {
+      if (event.touches.length !== 2) return;
+      const { x, y, distance } = local(event.touches);
+      const at = pointOn(x, y);
+      const page = at && scroller.querySelector<HTMLElement>(`[data-page="${at.page}"]`);
+      if (!at || !page || distance < 10) return;
+      event.preventDefault();
+      if (settle.current) clearTimeout(settle.current);
+      pinch = { distance, zoom: zoomRef.current, anchor: at, page, next: zoomRef.current, x, y };
+      const content = contentRef.current;
+      if (content) {
+        content.style.transformOrigin = "0 0";
+        content.style.willChange = "transform";
+      }
+    };
+    const move = (event: TouchEvent) => {
+      if (!pinch) return;
+      event.preventDefault();
+      if (event.touches.length < 2) return;
+      const { x, y, distance } = local(event.touches);
+      pinch.next = pinchZoom(pinch.zoom, distance / pinch.distance);
+      pinch.x = x;
+      pinch.y = y;
+      if (!frame) frame = requestAnimationFrame(paint);
+    };
+    const end = (event: TouchEvent) => {
+      if (!pinch || event.touches.length >= 2) return;
+      const done = pinch;
+      pinch = null;
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      const content = contentRef.current;
+      if (content) content.style.willChange = "";
+      settle.current = setTimeout(() => setDrawZoom(zoomRef.current), REDRAW_DELAY);
+      if (done.next === zoomRef.current) {
+        // Same size, but the fingers may have moved the pages.
+        if (content) content.style.transform = "";
+        scroller.scrollLeft = done.page.offsetLeft + done.anchor.fx * done.page.offsetWidth - done.x;
+        scroller.scrollTop = done.page.offsetTop + done.anchor.fy * done.page.offsetHeight - done.y;
+        return;
+      }
+      // Taken over as a whole: the layout effect scrolls to the anchor and drops the picture in the same frame.
+      anchor.current = { ...done.anchor, x: done.x, y: done.y };
+      zoomRef.current = done.next;
+      setZoom(done.next);
+    };
+    // Safari's own pinch gesture would zoom the whole page.
+    const refuse = (event: Event) => event.preventDefault();
+    scroller.addEventListener("touchstart", begin, { passive: false });
+    scroller.addEventListener("touchmove", move, { passive: false });
+    scroller.addEventListener("touchend", end);
+    scroller.addEventListener("touchcancel", end);
+    scroller.addEventListener("gesturestart", refuse);
     return () => {
-      scroller.removeEventListener("pointerdown", down);
-      scroller.removeEventListener("pointermove", move);
-      scroller.removeEventListener("pointerup", up);
-      scroller.removeEventListener("pointercancel", up);
+      if (frame) cancelAnimationFrame(frame);
+      scroller.removeEventListener("touchstart", begin);
+      scroller.removeEventListener("touchmove", move);
+      scroller.removeEventListener("touchend", end);
+      scroller.removeEventListener("touchcancel", end);
+      scroller.removeEventListener("gesturestart", refuse);
     };
-  }, [scroller, zoomTo]);
+  }, [scroller, pointOn]);
 
   // Where the reader was. A tab that is hidden gives its reader no size at all and the browser forgets
   // its scroll position; shown again, it is put back.
@@ -673,7 +790,7 @@ export function PdfViewer({
         ) : !doc ? (
           <div className="skeleton m-3 h-[60vh] rounded-field" />
         ) : (
-          <div className="flex w-max min-w-full flex-col gap-3" style={{ padding: GUTTER }}>
+          <div ref={contentRef} className="flex w-max min-w-full flex-col gap-3" style={{ padding: GUTTER }}>
             {Array.from({ length: pages }, (_, i) => (
               <Page
                 key={i}
