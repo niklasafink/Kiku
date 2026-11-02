@@ -117,7 +117,15 @@ export function DocWorkspace({
     };
     measure();
     window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    // What sits above can still change after the first render: the app's header goes once the bar takes over its buttons.
+    const above = new ResizeObserver(measure);
+    for (let node: Element | null = root.current; node && node !== document.body; node = node.parentElement) {
+      for (let sibling = node.previousElementSibling; sibling; sibling = sibling.previousElementSibling) above.observe(sibling);
+    }
+    return () => {
+      window.removeEventListener("resize", measure);
+      above.disconnect();
+    };
   }, []);
 
   function keep(next: number | null) {
@@ -138,7 +146,7 @@ export function DocWorkspace({
   return (
     <div
       ref={root}
-      className="grid grid-rows-[78dvh_78dvh] gap-3 md:min-h-[26rem] md:grid-cols-[minmax(0,var(--left))_1rem_minmax(0,var(--right))] md:grid-rows-[minmax(0,1fr)] md:gap-0 md:h-[calc(100dvh-var(--doc-top)-1rem)]"
+      className="grid grid-rows-[78dvh_78dvh] gap-3 md:min-h-[26rem] md:grid-cols-[minmax(0,var(--left))_1rem_minmax(0,var(--right))] md:grid-rows-[minmax(0,1fr)] md:gap-0 md:h-[calc(100dvh-var(--doc-top)-max(1rem,env(safe-area-inset-bottom)))]"
       style={{ "--doc-top": `${top}px`, "--left": `${split}fr`, "--right": `${1 - split}fr` } as React.CSSProperties}
     >
       <Pane tabs={left} active={leftTab} onChange={setLeftTab} name="Aufgabe und Lösung" />
