@@ -838,7 +838,7 @@ export function Handwriting({
   };
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       <InkToolbar
         tool={tool}
         onTool={setTool}
@@ -858,7 +858,7 @@ export function Handwriting({
       {/* A window on the long sheet: it scrolls in here, the page around it stays where it is. */}
       <div
         ref={windowRef}
-        className="h-[calc(100dvh-21rem)] min-h-80 overflow-y-auto overscroll-contain rounded-field border-2 border-base-300 bg-white"
+        className="min-h-80 flex-1 overflow-y-auto overscroll-contain rounded-field border-2 border-base-300 bg-white"
       >
         <InkSurface
           strokes={strokes}

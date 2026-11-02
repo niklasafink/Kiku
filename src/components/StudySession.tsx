@@ -849,14 +849,10 @@ export function StudySession({
   );
 
   const inputBlock = (
-    <section className="flex flex-col gap-3">
+    // The sheet to write on reaches down to the same line as the task beside it.
+    <section className={`flex flex-col gap-3 ${mode === "pen" ? "min-h-0 flex-1" : ""}`}>
       {mode === "pen" ? (
-        <>
-          <Handwriting strokes={strokes} onChange={(next) => patch(card.id, { ink: next })} disabled={grading} />
-          <p className="text-sm opacity-70">
-            {handedIn ? "Mit „Fertig“ liest die KI deine Handschrift und gleicht sie mit der Lösung ab." : "Bei der Abgabe liest die KI deine Handschrift."}
-          </p>
-        </>
+        <Handwriting strokes={strokes} onChange={(next) => patch(card.id, { ink: next })} disabled={grading} />
       ) : mode === "speak" ? (
         <>
           <Recorder
