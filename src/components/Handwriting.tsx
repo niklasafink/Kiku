@@ -48,6 +48,10 @@ const HOLD_LENGTH = 24;
 const LEVEL = 0.04;
 /** Room around the selected writing in which it can be grabbed. */
 const GRAB = 12;
+/** Smallest side of that frame: a lone line has no height, and a frame around it only 24 high is missed by the pen. */
+const MIN_FRAME = 48;
+/** How far outside the frame, in pixels of the screen, a press still grabs it. */
+const GRAB_SLOP = 16;
 export const UNDO_STEPS = 100;
 /** A page of a PDF gets fewer pixels than a sheet of paper: a document has many pages. */
 const PAGE_PIXELS = 6_000_000;
@@ -92,6 +96,14 @@ interface Moving extends Touching {
 type Gesture = Drawing | Erasing | Looping | Moving;
 
 const NOTHING: Box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+
+/** The frame around selected writing: GRAB around it, and at least MIN_FRAME wide and high. */
+function frameOf(selected: Stroke[]): Box {
+  const box = boxOf(selected);
+  const padX = Math.max(GRAB, (MIN_FRAME - (box.right - box.left)) / 2);
+  const padY = Math.max(GRAB, (MIN_FRAME - (box.bottom - box.top)) / 2);
+  return { left: box.left - padX, top: box.top - padY, right: box.right + padX, bottom: box.bottom + padY };
+}
 
 /** Safari tells a pen from a finger when a touch begins; only then can the pen alone be kept from scrolling. */
 const knowsStylus = () => typeof Touch !== "undefined" && "touchType" in Touch.prototype;
@@ -308,14 +320,14 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
         liveBox.current = boxOf([{ points: active.path }]);
       } else if (selected) {
         const { x, y } = offset.current;
-        const box = boxOf(selected);
+        const frame = frameOf(selected);
         context.save();
         context.translate(x, y);
         drawStrokes(context, selected, INK);
         dashed();
-        context.strokeRect(box.left - GRAB, box.top - GRAB, box.right - box.left + GRAB * 2, box.bottom - box.top + GRAB * 2);
+        context.strokeRect(frame.left, frame.top, frame.right - frame.left, frame.bottom - frame.top);
         context.restore();
-        liveBox.current = { left: box.left + x - GRAB, top: box.top + y - GRAB, right: box.right + x + GRAB, bottom: box.bottom + y + GRAB };
+        liveBox.current = { left: frame.left + x, top: frame.top + y, right: frame.right + x, bottom: frame.bottom + y };
       }
     });
   }, []);
@@ -537,10 +549,11 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
       erase(erasing, at);
     } else if (tool === "lasso") {
       const selected = selectionRef.current;
-      const box = selected && boxOf(selected);
-      // The frame is as easy to grab on a page shown small as on paper.
-      const grab = Math.max(GRAB, GRAB / scale);
-      const grabbed = box && at.x >= box.left - grab && at.x <= box.right + grab && at.y >= box.top - grab && at.y <= box.bottom + grab;
+      const frame = selected && frameOf(selected);
+      // A press a little outside the frame still grabs it, as much on a page shown small as on paper.
+      const slop = GRAB_SLOP / scale;
+      const grabbed =
+        frame && at.x >= frame.left - slop && at.x <= frame.right + slop && at.y >= frame.top - slop && at.y <= frame.bottom + slop;
       if (grabbed) gesture.current = { ...touching, kind: "move", at };
       else {
         selectionRef.current = null;
