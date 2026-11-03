@@ -48,6 +48,15 @@ const MODES = [
   { mode: "file", label: "PDF oder Foto hochladen", Icon: Upload },
 ] as const;
 const MODE_KEY = "kiku-answer-mode";
+/** How long the session waits after a change before it is written (ms). */
+const SAVE_DELAY = 700;
+
+/** Writes what is still unsaved of the session, if anything. */
+function saveNow(unsaved: { current: (() => void) | null }) {
+  const write = unsaved.current;
+  unsaved.current = null;
+  write?.();
+}
 
 function storedMode(): AnswerMode {
   try {
@@ -149,18 +158,34 @@ export function StudySession({
   }
 
   // A session is worth keeping once something happened in it and until the summary is reached;
-  // an exam also while it waits to be handed in. It is written with every change (every stroke,
-  // every letter), so reloading the page or closing the tab loses nothing.
+  // an exam also while it waits to be handed in. It is written once the hand pauses after a change
+  // (a stroke, a letter), and at once when the page is left or hidden, so a reload loses nothing.
+  // Writing it with every stroke copied all the ink of the session each time and held up the next one.
+  const unsaved = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!sessionKey) return;
     const started =
       index > 0 || Object.values(states).some((s) => s.attempt || s.revealed || s.pending || s.answer.trim() || hasInk(s.ink));
-    if (started && (index < cards.length || (exam && !handedIn))) {
-      void saveSession({ key: sessionKey, cardIds: cards.map((c) => c.id), index, states });
-    } else {
-      void clearSession(sessionKey);
-    }
+    unsaved.current =
+      started && (index < cards.length || (exam && !handedIn))
+        ? () => void saveSession({ key: sessionKey, cardIds: cards.map((c) => c.id), index, states })
+        : () => void clearSession(sessionKey);
+    const timer = setTimeout(() => saveNow(unsaved), SAVE_DELAY);
+    return () => clearTimeout(timer);
   }, [sessionKey, cards, index, states, exam, handedIn]);
+  useEffect(() => {
+    const hidden = () => {
+      if (document.visibilityState === "hidden") saveNow(unsaved);
+    };
+    const leaving = () => saveNow(unsaved);
+    document.addEventListener("visibilitychange", hidden);
+    window.addEventListener("pagehide", leaving);
+    return () => {
+      document.removeEventListener("visibilitychange", hidden);
+      window.removeEventListener("pagehide", leaving);
+      saveNow(unsaved);
+    };
+  }, []);
   useEffect(() => {
     if (sessionKey && Object.keys(answerFiles).length > 0) void saveSessionFiles(sessionKey, answerFiles);
   }, [sessionKey, answerFiles]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent, type ReactNode } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent, type ReactNode } from "react";
 import { Eraser, Highlighter, Lasso, PenLine, Redo2, Slash, Trash2, Undo2, type LucideIcon } from "lucide-react";
 import {
   boxOf,
@@ -244,11 +244,22 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   // The part of the upper layer that is painted on.
   const liveBox = useRef<Box>(NOTHING);
   const strokesRef = useRef(strokes);
+  // The strokes last given by the owner. A finished stroke reaches the owner a little later (see
+  // finish); until then the sheet here is ahead of them and must not be set back to them.
+  const given = useRef(strokes);
   const selectionRef = useRef(selection);
   // The latest `commit`, for what the owner calls later (a selection that is deleted).
   const commitRef = useRef<(next: Stroke[]) => void>(() => {});
+  // Where the surface lies on the screen, measured when a pointer comes down: measuring with every
+  // movement made the browser lay out the page anew whenever something on it had changed.
+  const rect = useRef<DOMRect | null>(null);
+  // Where the browser expects the pen to be next: drawn ahead of the stroke, so the line keeps up with the pen.
+  const ahead = useRef<InkPoint[]>([]);
   useEffect(() => {
-    strokesRef.current = strokes;
+    if (given.current !== strokes) {
+      given.current = strokes;
+      strokesRef.current = strokes;
+    }
     selectionRef.current = selection;
     commitRef.current = commit;
   });
@@ -307,9 +318,10 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
       const selected = selectionRef.current;
       if (active?.kind === "draw") {
         const { stroke } = active;
-        if (stroke.highlight) drawStroke(context, stroke, INK);
-        else drawInk(context, stroke.points, INK, active.straight);
-        liveBox.current = boxOf([{ points: stroke.points }]);
+        const points = ahead.current.length > 0 ? [...stroke.points, ...ahead.current] : stroke.points;
+        if (stroke.highlight) drawStroke(context, { ...stroke, points }, INK);
+        else drawInk(context, points, INK, active.straight);
+        liveBox.current = boxOf([{ points }]);
       } else if (active?.kind === "loop") {
         context.save();
         dashed();
@@ -395,11 +407,11 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   }, [nativeScroll]);
 
   function toPoints(event: PointerEvent<HTMLCanvasElement>, samples: globalThis.PointerEvent[]): InkPoint[] {
-    const rect = event.currentTarget.getBoundingClientRect();
+    const { left, top } = (rect.current ??= event.currentTarget.getBoundingClientRect());
     return samples.map((sample) => ({
       // The page of a PDF is drawn in its own units and shown larger or smaller.
-      x: (sample.clientX - rect.left) / scale,
-      y: (sample.clientY - rect.top) / scale,
+      x: (sample.clientX - left) / scale,
+      y: (sample.clientY - top) / scale,
       // 0 from a pen means "not known yet", see settlePressure.
       pressure: sample.pointerType === "pen" ? sample.pressure : 0.5,
     }));
@@ -409,6 +421,12 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   function pointsOf(event: PointerEvent<HTMLCanvasElement>) {
     const samples = event.nativeEvent.getCoalescedEvents?.() ?? [];
     return toPoints(event, samples.length > 0 ? samples : [event.nativeEvent]);
+  }
+
+  /** Where the pen is expected next, at the pressure it has now; nothing where the browser does not guess. */
+  function predictedOf(event: PointerEvent<HTMLCanvasElement>, last: InkPoint) {
+    const samples = event.nativeEvent.getPredictedEvents?.() ?? [];
+    return samples.length > 0 ? toPoints(event, samples).map((point) => ({ ...point, pressure: last.pressure })) : [];
   }
 
   /** Puts a changed sheet in place of the current one; the owner keeps the old one for undo. */
@@ -432,6 +450,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     else if (Math.abs(end.x - from.x) < length * LEVEL) end.x = from.x;
     drawing.straight = true;
     drawing.stroke.points = [{ ...from, pressure: 0.5 }, end];
+    ahead.current = [];
   }
 
   /** Starts the wait for a pen that is held still; every real movement starts it anew. */
@@ -450,6 +469,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   /** The pointer lifted: what it was doing takes effect. */
   function finish(active: Gesture) {
     gesture.current = null;
+    ahead.current = [];
     clearTimeout(hold.current);
     if (active.kind === "draw") {
       const { stroke } = active;
@@ -461,7 +481,9 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
         drawStroke(contextOf(canvasRef.current!), stroke, INK);
         painted.current = next;
       }
-      commit(next);
+      // The stroke is on the sheet already; the owner (the whole page around it, which also saves
+      // it) gets it as an update that gives way to the pen, so the next stroke does not wait for it.
+      startTransition(() => commit(next));
     } else if (active.kind === "erase") {
       if (active.gone.size > 0) commit(strokesRef.current.filter((stroke) => !active.gone.has(stroke)));
     } else if (active.kind === "loop") {
@@ -486,6 +508,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   /** Drops what a pointer was doing that turned out to be the palm. */
   function discard(active: Gesture) {
     gesture.current = null;
+    ahead.current = [];
     clearTimeout(hold.current);
     if (active.kind === "erase") {
       // What it took away is gone from the lower layer; bring it back.
@@ -539,6 +562,8 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     event.preventDefault();
     capture(event.currentTarget, event.pointerId);
     down.current = { x: event.clientX, y: event.clientY, time: event.timeStamp };
+    rect.current = event.currentTarget.getBoundingClientRect();
+    ahead.current = [];
     const touching = { pointerId: event.pointerId, type, time: event.timeStamp };
     const points = pointsOf(event);
     const [at] = points;
@@ -628,6 +653,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     else {
       active.stroke.points.push(...points);
       settlePressure(active.stroke.points);
+      ahead.current = predictedOf(event, last);
       if (Math.hypot(last.x - active.rest.x, last.y - active.rest.y) > HOLD_RADIUS) {
         active.rest = last;
         watchHold(active);
