@@ -2,6 +2,7 @@
 // a server database or sync layer can later be added behind these functions.
 import { z } from "zod";
 import { db } from "./db";
+import { packStroke, unpackStroke, type Stroke } from "./ink";
 import { MAX_TAG_LENGTH, MAX_TAGS } from "./syncProtocol";
 import { descendantIds } from "./tree";
 import type { Attempt, Card, Folder, PendingAnswer, SavedSession } from "./types";
@@ -239,13 +240,19 @@ export const learnSessionKey = (tag: string | null, folderId: string | null) => 
  */
 const filesKey = (key: string) => `${key}#files`;
 
+/** The handwriting of each card in a session, packed for storing or unpacked after loading (see packStroke). */
+function mapInk(states: SavedSession["states"], map: (stroke: Stroke) => Stroke): SavedSession["states"] {
+  return Object.fromEntries(Object.entries(states).map(([id, state]) => [id, state.ink ? { ...state, ink: state.ink.map(map) } : state]));
+}
+
 export async function loadSession(key: string): Promise<SavedSession | undefined> {
   const [session, files] = await db.sessions.bulkGet([key, filesKey(key)]);
-  return session && { ...session, files: files?.files };
+  return session && { ...session, states: mapInk(session.states, unpackStroke), files: files?.files };
 }
 
 export async function saveSession(session: Omit<SavedSession, "updatedAt" | "files">): Promise<void> {
-  await db.sessions.put({ ...session, updatedAt: Date.now() });
+  // Stored packed; the type of the row stays that of the session as it is used.
+  await db.sessions.put({ ...session, states: mapInk(session.states, packStroke as unknown as (stroke: Stroke) => Stroke), updatedAt: Date.now() });
 }
 
 export async function saveSessionFiles(key: string, files: Record<string, File>): Promise<void> {

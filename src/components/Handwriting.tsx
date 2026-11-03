@@ -10,6 +10,7 @@ import {
   eraserHits,
   inkBottom,
   movedStroke,
+  strokeBox,
   strokesInLoop,
   type Box,
   type InkPoint,
@@ -25,8 +26,10 @@ const LINE_GAP = 38;
 /** Ink on the paper: always dark on white, whatever the theme, like paper in GoodNotes. */
 const INK = "#1b1b24";
 const SELECTION = "#4f5bd5";
-/** Largest canvas iPadOS paints; a bigger one stays blank, so a very long sheet gets coarser instead. */
-const MAX_PIXELS = 16_000_000;
+/** The paper is painted in bands of this height; only those in view and next to it exist. */
+const BAND = 512;
+/** Bands kept painted above and below what is in view, so scrolling does not reveal them empty. */
+const OVERSCAN = 1;
 /** How far a finger moves before it scrolls: a hand that only rests on the paper stays below it. */
 const SCROLL_SLOP = 8;
 /** A touch that ends this soon and this close to where it began is a tap, not a stroke (ms, CSS px). */
@@ -84,6 +87,8 @@ interface Erasing extends Touching {
   kind: "erase";
   gone: Set<Stroke>;
   at: { x: number; y: number };
+  /** Where strokes were taken away that the lower layer still shows. */
+  dirty: Box;
 }
 interface Looping extends Touching {
   kind: "loop";
@@ -96,6 +101,13 @@ interface Moving extends Touching {
 type Gesture = Drawing | Erasing | Looping | Moving;
 
 const NOTHING: Box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+
+const joinBoxes = (a: Box, b: Box): Box => ({
+  left: Math.min(a.left, b.left),
+  top: Math.min(a.top, b.top),
+  right: Math.max(a.right, b.right),
+  bottom: Math.max(a.bottom, b.bottom),
+});
 
 /** The frame around selected writing: GRAB around it, and at least MIN_FRAME wide and high. */
 function frameOf(selected: Stroke[]): Box {
@@ -174,6 +186,66 @@ function scrollerOf(element: HTMLElement): Element | Window {
   return window;
 }
 
+/**
+ * The lower layer, the finished writing, painted on bands across the sheet; a page of a PDF is one
+ * band. One canvas as long as the sheet made every finished stroke update millions of pixels, and
+ * the pen got slower with every page that was written.
+ */
+interface Bands {
+  holder: HTMLElement;
+  tiles: Map<number, HTMLCanvasElement>;
+  width: number;
+  height: number;
+  /** Height of a band. */
+  band: number;
+  /** Pixels of the canvas per unit. */
+  ratio: number;
+  blend: boolean;
+}
+
+/** True if the box reaches into band `index`, with room for the width of a line. */
+function inBand(bands: Bands, box: Box, index: number) {
+  return box.bottom + WIPE >= index * bands.band && box.top - WIPE <= (index + 1) * bands.band;
+}
+
+/** A band's drawing context, set so that its units are those of the sheet. */
+function bandContext(bands: Bands, index: number, tile: HTMLCanvasElement) {
+  const context = tile.getContext("2d")!;
+  context.setTransform(bands.ratio, 0, 0, bands.ratio, 0, -index * bands.band * bands.ratio);
+  return context;
+}
+
+function paintBand(bands: Bands, index: number, tile: HTMLCanvasElement, strokes: Stroke[]) {
+  const context = bandContext(bands, index, tile);
+  context.clearRect(0, index * bands.band, bands.width, bands.band);
+  drawStrokes(context, strokes.filter((stroke) => inBand(bands, strokeBox(stroke), index)), INK);
+}
+
+/** Keeps the bands from `first` to `last`, the new ones painted with `strokes`, and frees the others. */
+function placeBands(bands: Bands, first: number, last: number, strokes: Stroke[]) {
+  for (const [index, tile] of bands.tiles) {
+    if (index >= first && index <= last) continue;
+    // Safari holds on to the memory of a canvas until its size is zero.
+    tile.width = 0;
+    tile.height = 0;
+    tile.remove();
+    bands.tiles.delete(index);
+  }
+  for (let index = first; index <= last; index++) {
+    if (bands.tiles.has(index)) continue;
+    const top = index * bands.band;
+    const height = Math.min(bands.band, bands.height - top);
+    const tile = document.createElement("canvas");
+    tile.width = Math.round(bands.width * bands.ratio);
+    tile.height = Math.round(height * bands.ratio);
+    Object.assign(tile.style, { position: "absolute", left: "0", top: `${top}px`, display: "block", width: "100%", height: `${height}px` });
+    if (bands.blend) tile.style.mixBlendMode = "multiply";
+    bands.holder.append(tile);
+    bands.tiles.set(index, tile);
+    paintBand(bands, index, tile, strokes);
+  }
+}
+
 /** A page of a PDF to mark: its size in the units the strokes are in, and how large it is shown. */
 export interface InkPage {
   width: number;
@@ -207,13 +279,20 @@ export interface InkSurfaceProps {
  * fingers scroll (see notePen).
  */
 export function InkSurface({ strokes, onChange, tool, disabled, page, onSelection, onTap, children }: InkSurfaceProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Takes the pointer; the layers lie above it and let it through.
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const holderRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
+  const bands = useRef<Bands | null>(null);
+  // What the bands show, and new bands are painted with.
+  const baseStrokes = useRef(strokes);
+  // The upper layer covers what is in view of a sheet of paper (all of a page); where on the sheet it begins.
+  const liveTop = useRef(0);
   const [grown, setHeight] = useState(() => Math.max(START_HEIGHT, inkBottom(strokes) + MARGIN));
   // A sheet of paper grows with the writing; a page of a PDF has the size of the page.
   const height = page ? page.height : strokes.length === 0 ? START_HEIGHT : grown;
   const scale = page?.scale ?? 1;
-  const maxPixels = page ? PAGE_PIXELS : MAX_PIXELS;
+  const onPage = page !== undefined;
   // What the lasso caught, with the tool it was caught with. It counts only while all of it is still on the sheet.
   const [caught, setCaught] = useState<{ strokes: Stroke[]; tool: Tool } | null>(null);
   const selection = useMemo(
@@ -231,6 +310,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   const scrolling = useRef<{ pointerId: number; y: number; moved: boolean; velocity: number; time: number } | null>(null);
   const momentum = useRef(0);
   const frame = useRef(0);
+  const eraseFrame = useRef(0);
   const hold = useRef<ReturnType<typeof setTimeout>>(undefined);
   // When the pen last touched the paper. Hovering above it does not count.
   const lastPen = useRef(-Infinity);
@@ -244,9 +324,11 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   // The part of the upper layer that is painted on.
   const liveBox = useRef<Box>(NOTHING);
   const strokesRef = useRef(strokes);
-  // The strokes last given by the owner. A finished stroke reaches the owner a little later (see
-  // finish); until then the sheet here is ahead of them and must not be set back to them.
+  // The strokes last given by the owner, and the sheets handed to it that it has not given back yet,
+  // oldest first. A finished stroke reaches the owner a little later (see finish), and the owner may
+  // give back an older sheet after a newer one was handed over; the sheet here must not go back to it.
   const given = useRef(strokes);
+  const sent = useRef<Stroke[][]>([]);
   const selectionRef = useRef(selection);
   // The latest `commit`, for what the owner calls later (a selection that is deleted).
   const commitRef = useRef<(next: Stroke[]) => void>(() => {});
@@ -258,53 +340,40 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   useEffect(() => {
     if (given.current !== strokes) {
       given.current = strokes;
-      strokesRef.current = strokes;
+      const echo = sent.current.indexOf(strokes);
+      if (echo >= 0) sent.current = sent.current.slice(echo + 1);
+      else {
+        // A change of the owner's own: undo, emptying the sheet, another card.
+        sent.current = [];
+        strokesRef.current = strokes;
+      }
     }
     selectionRef.current = selection;
     commitRef.current = commit;
   });
 
-  /** The layer's drawing context, scaled so one unit is one CSS pixel. */
-  const contextOf = (canvas: HTMLCanvasElement) => {
-    const context = canvas.getContext("2d")!;
-    const ratio = canvas.width / canvas.clientWidth;
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  /** The upper layer's drawing context, set so that its units are those of the sheet. */
+  const liveContext = () => {
+    const context = liveRef.current!.getContext("2d")!;
+    const ratio = bands.current?.ratio ?? 1;
+    context.setTransform(ratio, 0, 0, ratio, 0, -liveTop.current * ratio);
     return context;
   };
 
   /** Paints the lower layer anew. */
   const paintBase = useCallback((list: Stroke[]) => {
-    const canvas = canvasRef.current!;
-    const context = contextOf(canvas);
-    context.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    drawStrokes(context, list, INK);
+    baseStrokes.current = list;
+    const layer = bands.current;
+    if (layer) for (const [index, tile] of layer.tiles) paintBand(layer, index, tile, list);
   }, []);
-
-  const repaint = useCallback(() => {
-    const canvas = canvasRef.current;
-    const live = liveRef.current;
-    if (!canvas || !live || canvas.clientWidth === 0) return;
-    const width = canvas.clientWidth;
-    const ratio = Math.min((window.devicePixelRatio || 1) * scale, Math.sqrt(maxPixels / (width * height)));
-    const resized = canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio);
-    if (resized) {
-      for (const layer of [canvas, live]) {
-        layer.width = Math.round(width * ratio);
-        layer.height = Math.round(height * ratio);
-      }
-      liveBox.current = NOTHING;
-    } else if (painted.current === shown) return;
-    paintBase(shown);
-    painted.current = shown;
-  }, [shown, height, scale, maxPixels, paintBase]);
 
   /** Paints what is in the making on the upper layer, at most once per frame of the screen. */
   const paintLive = useCallback(() => {
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => {
       const live = liveRef.current;
-      if (!live || live.clientWidth === 0) return;
-      const context = contextOf(live);
+      if (!live || live.width === 0) return;
+      const context = liveContext();
       const old = liveBox.current;
       if (old.right >= old.left) context.clearRect(old.left - WIPE, old.top - WIPE, old.right - old.left + WIPE * 2, old.bottom - old.top + WIPE * 2);
       liveBox.current = NOTHING;
@@ -344,22 +413,110 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     });
   }, []);
 
-  useEffect(() => {
-    repaint();
+  /** Puts the bands and the upper layer where the sheet is in view. */
+  const placeView = useCallback(() => {
+    const surface = surfaceRef.current;
+    const live = liveRef.current;
+    const layer = bands.current;
+    if (!surface || !live || !layer) return;
+    let top = 0;
+    let bottom = layer.height;
+    if (!onPage) {
+      const sheet = surface.getBoundingClientRect();
+      const scroller = scrollerOf(surface);
+      const view = scroller instanceof Element ? scroller.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      top = Math.min(layer.height - 1, Math.max(0, Math.floor(Math.max(0, view.top) - sheet.top)));
+      bottom = Math.min(layer.height, Math.max(top + 1, Math.ceil(Math.min(window.innerHeight, view.bottom) - sheet.top)));
+    }
+    const first = Math.max(0, Math.floor(top / layer.band) - OVERSCAN);
+    const last = Math.min(Math.ceil(layer.height / layer.band) - 1, Math.floor(bottom / layer.band) + OVERSCAN);
+    placeBands(layer, first, last, baseStrokes.current);
+
+    const width = Math.round(layer.width * layer.ratio);
+    const height = Math.max(1, Math.round((bottom - top) * layer.ratio));
+    if (live.width !== width || live.height !== height) {
+      // A new size also empties the canvas.
+      live.width = width;
+      live.height = height;
+    } else if (liveTop.current !== top) {
+      const context = live.getContext("2d")!;
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, width, height);
+    } else return;
+    liveTop.current = top;
+    live.style.top = `${top}px`;
+    live.style.height = `${bottom - top}px`;
+    liveBox.current = NOTHING;
     paintLive();
+  }, [onPage, paintLive]);
+
+  /** Sets the bands up anew when the sheet changed its size, else paints them anew if they are behind. True if set up anew. */
+  const repaint = useCallback(() => {
+    const surface = surfaceRef.current;
+    const holder = holderRef.current;
+    if (!surface || !holder || surface.clientWidth === 0) return false;
+    const width = surface.clientWidth;
+    const pixels = window.devicePixelRatio || 1;
+    const ratio = onPage ? Math.min(pixels * scale, Math.sqrt(PAGE_PIXELS / (width * height))) : pixels;
+    const old = bands.current;
+    if (old && old.width === width && old.height === height && old.ratio === ratio) {
+      if (painted.current !== shown) {
+        paintBase(shown);
+        painted.current = shown;
+      }
+      return false;
+    }
+    if (old) placeBands(old, 0, -1, []);
+    bands.current = { holder, tiles: new Map(), width, height, band: onPage ? height : BAND, ratio, blend: onPage };
+    baseStrokes.current = shown;
+    painted.current = shown;
+    // Makes placeView size the upper layer anew.
+    liveRef.current!.width = 0;
+    return true;
+  }, [shown, height, scale, onPage, paintBase]);
+
+  useEffect(() => {
+    if (repaint()) placeView();
+    paintLive();
+  }, [repaint, placeView, paintLive]);
+
+  useEffect(() => {
+    const surface = surfaceRef.current!;
     const observer = new ResizeObserver(() => {
       repaint();
-      paintLive();
+      placeView();
     });
-    observer.observe(canvasRef.current!);
+    observer.observe(surface);
+    // The window on the sheet can change its height while the sheet keeps its own.
+    const scroller = scrollerOf(surface);
+    if (scroller instanceof Element) observer.observe(scroller);
     return () => observer.disconnect();
-  }, [repaint, paintLive]);
+  }, [repaint, placeView]);
+
+  // On paper, the bands and the upper layer follow the scrolling.
+  useEffect(() => {
+    if (onPage) return;
+    let pending = 0;
+    const follow = () => {
+      cancelAnimationFrame(pending);
+      pending = requestAnimationFrame(placeView);
+    };
+    window.addEventListener("scroll", follow, { capture: true, passive: true });
+    window.addEventListener("resize", follow);
+    return () => {
+      window.removeEventListener("scroll", follow, { capture: true });
+      window.removeEventListener("resize", follow);
+      cancelAnimationFrame(pending);
+    };
+  }, [onPage, placeView]);
 
   useEffect(
     () => () => {
       cancelAnimationFrame(momentum.current);
       cancelAnimationFrame(frame.current);
+      cancelAnimationFrame(eraseFrame.current);
       clearTimeout(hold.current);
+      if (bands.current) placeBands(bands.current, 0, -1, []);
     },
     [],
   );
@@ -368,7 +525,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   // selecting text, the magnifier) and then ends the stroke halfway. Refusing the touch keeps
   // the pen here. React listens passively, where refusing is not possible, hence by hand.
   useEffect(() => {
-    const canvas = canvasRef.current!;
+    const canvas = surfaceRef.current!;
     const writing = (time: number) => {
       const active = gesture.current;
       return (active?.type === "pen" && time - active.time < STALE) || time - lastPen.current < PALM_GRACE;
@@ -406,7 +563,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     };
   }, [nativeScroll]);
 
-  function toPoints(event: PointerEvent<HTMLCanvasElement>, samples: globalThis.PointerEvent[]): InkPoint[] {
+  function toPoints(event: PointerEvent<HTMLDivElement>, samples: globalThis.PointerEvent[]): InkPoint[] {
     const { left, top } = (rect.current ??= event.currentTarget.getBoundingClientRect());
     return samples.map((sample) => ({
       // The page of a PDF is drawn in its own units and shown larger or smaller.
@@ -418,13 +575,13 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   }
 
   /** The browser bundles fast pen movement into one event; the single samples make smooth lines. */
-  function pointsOf(event: PointerEvent<HTMLCanvasElement>) {
+  function pointsOf(event: PointerEvent<HTMLDivElement>) {
     const samples = event.nativeEvent.getCoalescedEvents?.() ?? [];
     return toPoints(event, samples.length > 0 ? samples : [event.nativeEvent]);
   }
 
   /** Where the pen is expected next, at the pressure it has now; nothing where the browser does not guess. */
-  function predictedOf(event: PointerEvent<HTMLCanvasElement>, last: InkPoint) {
+  function predictedOf(event: PointerEvent<HTMLDivElement>, last: InkPoint) {
     const samples = event.nativeEvent.getPredictedEvents?.() ?? [];
     return samples.length > 0 ? toPoints(event, samples).map((point) => ({ ...point, pressure: last.pressure })) : [];
   }
@@ -433,6 +590,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   function commit(next: Stroke[]) {
     const before = strokesRef.current;
     strokesRef.current = next;
+    sent.current = [...sent.current, next].slice(-UNDO_STEPS);
     onChange(next, before);
     // Keep room to write on: the sheet grows before the pen reaches its end.
     if (page) return;
@@ -477,15 +635,23 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
       const next = [...strokesRef.current, stroke];
       // Writing goes on top of the lower layer as it is. The marker belongs below the writing,
       // so with it the layer is painted anew.
-      if (!stroke.highlight && painted.current === strokesRef.current) {
-        drawStroke(contextOf(canvasRef.current!), stroke, INK);
+      const layer = bands.current;
+      if (!stroke.highlight && layer && painted.current === strokesRef.current) {
+        const box = strokeBox(stroke);
+        for (const [index, tile] of layer.tiles) if (inBand(layer, box, index)) drawStroke(bandContext(layer, index, tile), stroke, INK);
+        baseStrokes.current = next;
         painted.current = next;
       }
       // The stroke is on the sheet already; the owner (the whole page around it, which also saves
       // it) gets it as an update that gives way to the pen, so the next stroke does not wait for it.
       startTransition(() => commit(next));
     } else if (active.kind === "erase") {
-      if (active.gone.size > 0) commit(strokesRef.current.filter((stroke) => !active.gone.has(stroke)));
+      if (active.gone.size > 0) {
+        // The lower layer then shows the sheet as it is handed over, and need not be painted again.
+        const left = paintErased(active);
+        painted.current = left;
+        commit(left);
+      }
     } else if (active.kind === "loop") {
       const found = strokesInLoop(strokesRef.current, active.path);
       offset.current = { x: 0, y: 0 };
@@ -512,6 +678,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     clearTimeout(hold.current);
     if (active.kind === "erase") {
       // What it took away is gone from the lower layer; bring it back.
+      cancelAnimationFrame(eraseFrame.current);
       painted.current = null;
       repaint();
     }
@@ -519,7 +686,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     paintLive();
   }
 
-  function handleDown(event: PointerEvent<HTMLCanvasElement>) {
+  function handleDown(event: PointerEvent<HTMLDivElement>) {
     if (disabled) return;
     const type = event.pointerType;
     if (type === "mouse" && event.button !== 0) return;
@@ -569,7 +736,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     const [at] = points;
     // The button on the side of a stylus and the eraser end both erase.
     if (tool === "eraser" || event.buttons === 32 || (type === "pen" && event.buttons === 2)) {
-      const erasing: Erasing = { ...touching, kind: "erase", gone: new Set(), at };
+      const erasing: Erasing = { ...touching, kind: "erase", gone: new Set(), at, dirty: NOTHING };
       gesture.current = erasing;
       erase(erasing, at);
     } else if (tool === "lasso") {
@@ -601,15 +768,29 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     for (const stroke of strokesRef.current) {
       if (erasing.gone.has(stroke) || !eraserHits(stroke, erasing.at, to)) continue;
       erasing.gone.add(stroke);
+      erasing.dirty = joinBoxes(erasing.dirty, strokeBox(stroke));
       hit = true;
     }
     erasing.at = to;
     if (!hit) return;
-    paintBase(strokesRef.current.filter((stroke) => !erasing.gone.has(stroke)));
     painted.current = null;
+    // Painted once per frame of the screen, however many strokes the eraser met on the way.
+    cancelAnimationFrame(eraseFrame.current);
+    eraseFrame.current = requestAnimationFrame(() => paintErased(erasing));
   }
 
-  function handleMove(event: PointerEvent<HTMLCanvasElement>) {
+  /** Paints the bands anew where the eraser took strokes away; gives the strokes that are left. */
+  function paintErased(erasing: Erasing) {
+    cancelAnimationFrame(eraseFrame.current);
+    const left = strokesRef.current.filter((stroke) => !erasing.gone.has(stroke));
+    baseStrokes.current = left;
+    const layer = bands.current;
+    if (layer) for (const [index, tile] of layer.tiles) if (inBand(layer, erasing.dirty, index)) paintBand(layer, index, tile, left);
+    erasing.dirty = NOTHING;
+    return left;
+  }
+
+  function handleMove(event: PointerEvent<HTMLDivElement>) {
     if (event.pointerType === "pen" && event.buttons !== 0) lastPen.current = event.timeStamp;
     const scroll = scrolling.current;
     if (scroll && scroll.pointerId === event.pointerId) {
@@ -662,7 +843,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     paintLive();
   }
 
-  function handleUp(event: PointerEvent<HTMLCanvasElement>) {
+  function handleUp(event: PointerEvent<HTMLDivElement>) {
     if (event.pointerType === "pen") lastPen.current = event.timeStamp;
     const scroll = scrolling.current;
     if (scroll && scroll.pointerId === event.pointerId) {
@@ -706,13 +887,12 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
       className="relative origin-top-left"
       style={page ? { width: page.width, height: page.height, transform: `scale(${page.scale})` } : { height }}
     >
-      <canvas
-        ref={canvasRef}
+      <div
+        ref={surfaceRef}
         role="img"
         aria-label={page ? "Markierungen auf der Seite" : "Schreibfläche für deine handschriftliche Antwort"}
-        className={`block w-full select-none ${touchAction} ${cursor} ${page ? "mix-blend-multiply" : ""}`}
+        className={`absolute inset-0 select-none ${touchAction} ${cursor}`}
         style={{
-          height,
           // Faint ruling, like a writing pad.
           ...(page
             ? {}
@@ -727,7 +907,9 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
         onPointerCancel={handleUp}
         onContextMenu={(event) => event.preventDefault()}
       />
-      <canvas ref={liveRef} aria-hidden className="pointer-events-none absolute inset-0 block w-full" style={{ height }} />
+      <div ref={holderRef} aria-hidden className="pointer-events-none absolute inset-0" />
+      {/* Placed and sized by placeView. */}
+      <canvas ref={liveRef} aria-hidden className="pointer-events-none absolute left-0 top-0 block w-full" />
       {children}
     </div>
   );

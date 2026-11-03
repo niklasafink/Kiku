@@ -48,19 +48,26 @@ export function strokeOutline(points: InkPoint[], complete = true): number[][] {
   });
 }
 
-function fillOutline(context: CanvasRenderingContext2D, outline: number[][]): void {
+function traceOutline(path: CanvasPath, outline: number[][]): void {
   if (outline.length < 2) return;
-  context.beginPath();
-  context.moveTo(outline[0][0], outline[0][1]);
+  path.moveTo(outline[0][0], outline[0][1]);
   // Curves through the midpoints, so the edge of the line is round and not a polygon.
   for (let i = 0; i < outline.length; i++) {
     const a = outline[i];
     const b = outline[(i + 1) % outline.length];
-    context.quadraticCurveTo(a[0], a[1], (a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+    path.quadraticCurveTo(a[0], a[1], (a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
   }
-  context.closePath();
+  path.closePath();
+}
+
+function fillOutline(context: CanvasRenderingContext2D, outline: number[][]): void {
+  context.beginPath();
+  traceOutline(context, outline);
   context.fill();
 }
+
+/** The shape of each finished pen stroke, worked out once: the sheet paints the same strokes again and again. */
+const outlines = new WeakMap<Stroke, Path2D>();
 
 /** Paints pen points as one smooth line; with `complete` false as a stroke that is still being drawn. */
 export function drawInk(context: CanvasRenderingContext2D, points: InkPoint[], color: string, complete = true): void {
@@ -97,7 +104,19 @@ export function drawStroke(context: CanvasRenderingContext2D, stroke: Stroke, co
   if (points.length === 0) return;
   if (stroke.erase) drawBand(context, points, ERASER_WIDTH, "#000", true);
   else if (stroke.highlight) drawBand(context, points, HIGHLIGHT_WIDTH, HIGHLIGHT);
-  else drawInk(context, points, color);
+  else if (typeof Path2D === "undefined") drawInk(context, points, color);
+  else {
+    let outline = outlines.get(stroke);
+    if (!outline) {
+      outline = new Path2D();
+      traceOutline(outline, strokeOutline(points));
+      outlines.set(stroke, outline);
+    }
+    context.save();
+    context.fillStyle = color;
+    context.fill(outline);
+    context.restore();
+  }
 }
 
 /** Paints the strokes, the marker first so the writing stays dark on top of it. */
@@ -203,11 +222,42 @@ export function movedStroke(stroke: Stroke, dx: number, dy: number): Stroke {
 /** Lowest point that was written on, to know how much room is left below. */
 export function inkBottom(strokes: Stroke[]): number {
   let bottom = 0;
-  for (const stroke of strokes) {
-    if (stroke.erase) continue;
-    for (const point of stroke.points) bottom = Math.max(bottom, point.y);
-  }
+  for (const stroke of strokes) if (!stroke.erase && stroke.points.length > 0) bottom = Math.max(bottom, strokeBox(stroke).bottom);
   return bottom;
+}
+
+/**
+ * A stroke as it is stored: its points as one run of numbers (x, y and pressure of each), which is
+ * copied far faster than an object per point. A session of several pages has tens of thousands.
+ */
+export interface PackedStroke {
+  packed: Float32Array;
+  erase?: boolean;
+  highlight?: boolean;
+}
+
+const packs = new WeakMap<Stroke, PackedStroke>();
+
+/** The stroke to be stored; a finished stroke is never changed, so it is packed once. */
+export function packStroke(stroke: Stroke): PackedStroke {
+  let pack = packs.get(stroke);
+  if (!pack) {
+    const { points, ...flags } = stroke;
+    const packed = new Float32Array(points.length * 3);
+    points.forEach((point, i) => packed.set([point.x, point.y, point.pressure], i * 3));
+    pack = { ...flags, packed };
+    packs.set(stroke, pack);
+  }
+  return pack;
+}
+
+/** A stored stroke back as points; strokes stored before they were packed come as they are. */
+export function unpackStroke(stroke: Stroke | PackedStroke): Stroke {
+  if (!("packed" in stroke)) return stroke;
+  const { packed, ...flags } = stroke;
+  const points: InkPoint[] = [];
+  for (let i = 0; i + 2 < packed.length; i += 3) points.push({ x: packed[i], y: packed[i + 1], pressure: packed[i + 2] });
+  return { ...flags, points };
 }
 
 /** Longest edge of the picture sent to the AI; small handwriting stays readable at this size. */

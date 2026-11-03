@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boxOf, eraserHits, hasInk, movedStroke, strokesInLoop, type Stroke } from "./ink";
+import { boxOf, eraserHits, hasInk, inkBottom, movedStroke, packStroke, strokesInLoop, unpackStroke, type Stroke } from "./ink";
 
 const line = (x1: number, y1: number, x2: number, y2: number, extra: Partial<Stroke> = {}): Stroke => ({
   points: [
@@ -58,5 +58,21 @@ describe("hasInk", () => {
   it("does not take marking alone for an answer", () => {
     expect(hasInk([line(0, 0, 10, 10, { highlight: true })])).toBe(false);
     expect(hasInk([line(0, 0, 10, 10, { highlight: true }), line(0, 0, 10, 10)])).toBe(true);
+  });
+});
+
+describe("stored strokes", () => {
+  it("come back as they were written", () => {
+    const stroke = line(1.5, 2.25, 300, 40, { highlight: true });
+    expect(unpackStroke(packStroke(stroke))).toEqual(stroke);
+  });
+
+  it("take strokes stored before packing as they are", () => {
+    const stroke = line(0, 0, 10, 10);
+    expect(unpackStroke(stroke)).toBe(stroke);
+  });
+
+  it("know the lowest point written on", () => {
+    expect(inkBottom([line(0, 0, 10, 80), line(0, 500, 10, 900, { erase: true }), line(0, 0, 10, 120)])).toBe(120);
   });
 });
