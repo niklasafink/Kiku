@@ -1,52 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { alignSegments, createPainter, scoreSegments, splitSentences } from "./grading";
+import { createPainter, scoreSegments, segmentsFromIssues, splitSentences } from "./grading";
 
-describe("alignSegments", () => {
-  const solution = "Die Mitose besteht aus vier Phasen:\n- Prophase\n- Metaphase";
+describe("segmentsFromIssues", () => {
+  const sections = ["Nach § 8 Abs. 3 S. 2 KStG mindert die vGA das Einkommen nicht. ", "Sie wird außerbilanziell hinzugerechnet.\n", "Wert: gemeiner Wert."];
 
-  it("maps segments back onto the original text, keeping whitespace and punctuation", () => {
-    const result = alignSegments(solution, [
-      { text: "Die Mitose besteht aus vier Phasen", status: "correct", note: "genannt" },
-      { text: "Prophase", status: "missing", note: "" },
-      { text: "Metaphase", status: "unsure", note: "nur angedeutet" },
+  it("marks everything the model did not name as correct", () => {
+    expect(segmentsFromIssues(sections, [])).toEqual([{ text: sections.join(""), status: "correct" }]);
+  });
+
+  it("cuts out a single wrong detail and keeps the rest of the section correct", () => {
+    const result = segmentsFromIssues(sections, [{ index: 0, text: "Abs. 3", status: "missing", note: "Du hast Abs. 2 gesagt." }]);
+    expect(result.map((s) => s.text).join("")).toBe(sections.join(""));
+    expect(result.map((s) => [s.text, s.status])).toEqual([
+      ["Nach § 8 ", "correct"],
+      ["Abs. 3", "missing"],
+      [" S. 2 KStG mindert die vGA das Einkommen nicht. Sie wird außerbilanziell hinzugerechnet.\nWert: gemeiner Wert.", "correct"],
     ]);
-    expect(result).not.toBeNull();
-    expect(result!.map((s) => s.text).join("")).toBe(solution);
-    expect(result!.map((s) => s.status)).toEqual(["correct", "missing", "unsure"]);
-    expect(result![1].note).toBeUndefined();
+    expect(result[1].note).toBe("Du hast Abs. 2 gesagt.");
   });
 
-  it("tolerates whitespace differences", () => {
-    const result = alignSegments("Erster  Teil,\nzweiter Teil.", [
-      { text: "Erster Teil,", status: "correct" },
-      { text: "zweiter   Teil.", status: "missing" },
+  it("marks the whole section when the part is empty or cannot be found", () => {
+    const result = segmentsFromIssues(sections, [
+      { index: 1, text: "", status: "missing", note: "" },
+      { index: 2, text: "Teilwert", status: "unsure", note: "" },
     ]);
-    expect(result!.map((s) => s.text).join("")).toBe("Erster  Teil,\nzweiter Teil.");
+    expect(result.map((s) => s.status)).toEqual(["correct", "missing", "unsure"]);
+    expect(result[1].text).toBe(sections[1]);
+    expect(result[1].note).toBeUndefined();
   });
 
-  it("rejects segments that skip content", () => {
-    expect(
-      alignSegments(solution, [
-        { text: "Die Mitose besteht aus vier Phasen", status: "correct" },
-        { text: "Metaphase", status: "missing" },
-      ]),
-    ).toBeNull();
-  });
-
-  it("rejects rewritten text and a missing tail", () => {
-    expect(alignSegments(solution, [{ text: "Mitose hat vier Phasen", status: "correct" }])).toBeNull();
-    expect(
-      alignSegments(solution, [{ text: "Die Mitose besteht aus vier Phasen", status: "correct" }]),
-    ).toBeNull();
-  });
-
-  it("handles regex special characters in the solution", () => {
-    const text = "f(x) = x^2 + 1 (Parabel). Kosten: 5 $?";
-    const result = alignSegments(text, [
-      { text: "f(x) = x^2 + 1 (Parabel).", status: "correct" },
-      { text: "Kosten: 5 $?", status: "missing" },
+  it("tolerates whitespace and case and ignores indices outside the solution", () => {
+    const result = segmentsFromIssues(sections, [
+      { index: 2, text: "Gemeiner   wert", status: "missing", note: "" },
+      { index: 7, text: "", status: "missing", note: "" },
     ]);
-    expect(result!.map((s) => s.text).join("")).toBe(text);
+    expect(result.map((s) => [s.text, s.status]).slice(-1)).toEqual([["gemeiner Wert.", "missing"]]);
+    expect(result.map((s) => s.text).join("")).toBe(sections.join(""));
   });
 });
 
@@ -65,6 +54,13 @@ describe("splitSentences", () => {
 
   it("splits at sentence ends and line breaks", () => {
     expect(splitSentences("Eins. Zwei.\nDrei")).toEqual(["Eins. ", "Zwei.\n", "Drei"]);
+  });
+
+  it("does not cut after abbreviations and list numbers", () => {
+    expect(splitSentences("Nach § 3 Nr. 40 S. 1 Buchst. d EStG gilt das, i. V. m. § 3c EStG. 1. Punkt")).toEqual([
+      "Nach § 3 Nr. 40 S. 1 Buchst. d EStG gilt das, i. V. m. § 3c EStG. ",
+      "1. Punkt",
+    ]);
   });
 });
 
