@@ -15,9 +15,9 @@ import {
 import { refundAi, takeAi } from "@/server/aiQuota";
 import { currentUser, SERVER_MODE } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { planOf } from "@/server/plan";
 import { steuerrechtAvailable } from "@/server/steuerrecht";
 import { speakReply, tandemReply, type TandemAccess } from "@/server/tandem";
+import { metered, planFor } from "@/server/spend";
 
 // As long as a card may be, see MAX_CARD_TEXT.
 const card = z.object({ question: z.string().max(20_000), solution: z.string().max(20_000) });
@@ -53,11 +53,11 @@ const requestSchema = z.object({
  * { type: "audio" } for each voiced piece in order (base64 MP3, or null with the piece's text for
  * the browser's own voice), then { type: "done" } with the whole reply, or { type: "error" }.
  */
-export async function POST(request: Request) {
+export const POST = metered(async (request: Request) => {
   const user = SERVER_MODE ? await currentUser() : null;
   if (SERVER_MODE && !user) return Response.json({ error: "Bitte melde dich an." }, { status: 401 });
   // Locally the operator's own key pays, so everything is on.
-  const plan = user ? planOf(user) : "paid";
+  const plan = user ? await planFor(user) : "paid";
 
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Ungültige Anfrage." }, { status: 400 });
@@ -148,4 +148,4 @@ export async function POST(request: Request) {
     },
   });
   return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" } });
-}
+});

@@ -71,7 +71,7 @@ Open http://localhost:3000.
 | `TRANSCRIBE_MODEL` | no | `google/gemini-3.8-flash` | Model that transcribes recordings; must accept audio input |
 | `TANDEM_MODEL` | no | the grading model | Model that talks in the study tandem |
 | `SPEECH_MODEL` | no | `elevenlabs/eleven-v4-turbo` | Text-to-speech model on OpenRouter that voices the tandem |
-| `PAID_EMAILS` | no | | With accounts on: comma-separated e-mail addresses of paid accounts. Everyone else is on the free plan |
+| `PAID_EMAILS` | no | | With accounts on: comma-separated e-mail addresses of paid accounts. Everyone else is on the free plan. `a@example.com:5` gives the account a budget of 5 US dollars per calendar month; once its AI requests have cost that much, it is on the free plan until the month is over |
 | `ADMIN_EMAILS` | no | | With accounts on: comma-separated e-mail addresses of whoever runs the app: everything of the paid plan and no limits |
 
 With accounts on, AI use is limited per account: gradings, explanations and turns of the study tandem per month (`AI_LIMITS` in

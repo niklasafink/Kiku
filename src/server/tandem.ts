@@ -1,5 +1,6 @@
 import { isStepCount, streamText, tool, type ToolSet } from "ai";
 import { and, eq, isNull } from "drizzle-orm";
+import { after } from "next/server";
 import { z } from "zod";
 import { openrouter, openrouterKey, SPEECH_MODEL, TANDEM_FAST_MODEL, TANDEM_MODEL } from "@/lib/ai";
 import { NEXT_MARK, type TandemCard, type TandemMessage, type TandemMode, type TandemVoice } from "@/lib/tandem";
@@ -8,6 +9,7 @@ import { descendantIds, pathTo } from "@/lib/tree";
 import type { Database } from "./db";
 import { listFolders } from "./library";
 import { cards as cardTable } from "./schema";
+import { biller } from "./spend";
 import { callSteuerrecht, trimPackage } from "./steuerrecht";
 
 const PERSONA = `Du bist Kiku und lernst mit dem Nutzer zusammen, als Tandempartner: jemand, der für dieselbe Prüfung lernt und den Stoff richtig gut draufhat. Ihr redet miteinander. Was du schreibst, wird vorgelesen, und was er sagt, kommt als Transkript bei dir an.
@@ -337,5 +339,33 @@ export async function speakReply(text: string, voice: TandemVoice): Promise<Uint
     signal: AbortSignal.timeout(25_000),
   });
   if (!response.ok) throw new Error(`Speech request failed (${response.status}): ${(await response.text()).slice(0, 300)}`);
+  // The audio comes without its price. OpenRouter knows it a few seconds later, so it is booked once the reply is out.
+  const bill = biller();
+  const id = response.headers.get("x-generation-id");
+  if (bill && id) {
+    const book = () => speechCost(id).then(bill);
+    try {
+      after(book);
+    } catch {
+      void book();
+    }
+  }
   return new Uint8Array(await response.arrayBuffer());
+}
+
+/** What a voiced piece cost in US dollars, or undefined if OpenRouter does not say within ten seconds. */
+async function speechCost(id: string): Promise<number | undefined> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    try {
+      const response = await fetch(`https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${openrouterKey()}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (response.ok) return ((await response.json()) as { data?: { usage?: number } }).data?.usage;
+    } catch {
+      // Tried again below.
+    }
+  }
+  console.warn(`The cost of speech request ${id} could not be read and is not booked.`);
 }

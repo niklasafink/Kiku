@@ -3,6 +3,7 @@ import { errorResponse, FREE_PLAN_GRADING_MODELS } from "@/lib/ai";
 import { refundAi, takeAi } from "@/server/aiQuota";
 import { planOrDeny } from "@/server/auth";
 import { gradeAnswer } from "@/server/grade";
+import { metered } from "@/server/spend";
 
 // As long as a card may be, see MAX_CARD_TEXT.
 const MAX_CHARS = 20_000;
@@ -17,7 +18,7 @@ const requestSchema = z.object({
   context: z.string().max(500).optional(),
 });
 
-export async function POST(request: Request) {
+export const POST = metered(async (request: Request) => {
   const plan = await planOrDeny();
   if (plan instanceof Response) return plan;
 
@@ -39,4 +40,4 @@ export async function POST(request: Request) {
     await refundAi(allowance);
     return errorResponse(error);
   }
-}
+});

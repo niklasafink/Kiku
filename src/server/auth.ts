@@ -1,5 +1,6 @@
 import { createNeonAuth } from "@neondatabase/auth/next/server";
-import { planOf, type Plan } from "./plan";
+import type { Plan } from "./plan";
+import { planFor } from "./spend";
 
 /**
  * With a database and Neon Auth configured the app runs in server mode: accounts, sync and
@@ -67,5 +68,5 @@ export async function requireUser(): Promise<CurrentUser | Response> {
 export async function planOrDeny(): Promise<Plan | Response> {
   if (!SERVER_MODE) return "paid";
   const user = await currentUser();
-  return user ? planOf(user) : UNAUTHORIZED();
+  return user ? planFor(user) : UNAUTHORIZED();
 }

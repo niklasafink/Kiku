@@ -1,5 +1,6 @@
 // Server-side only: reads the OpenRouter key. Do not import from client components.
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { meteredFetch } from "@/server/spend";
 
 export const GRADING_MODEL = process.env.GRADING_MODEL || "openai/gpt-6-luna";
 // Free accounts: free models first, then the cheapest paid one that still grades reliably.
@@ -33,7 +34,7 @@ export function openrouterKey(): string {
 }
 
 export function openrouter() {
-  return createOpenRouter({ apiKey: openrouterKey() });
+  return createOpenRouter({ apiKey: openrouterKey(), fetch: meteredFetch });
 }
 
 export function errorResponse(error: unknown): Response {

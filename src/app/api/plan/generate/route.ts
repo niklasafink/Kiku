@@ -4,9 +4,9 @@ import { schedulePlan } from "@/lib/studyPlan";
 import { requireUser } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { planTopics } from "@/server/generatePlan";
-import { planOf } from "@/server/plan";
 import { refundGenerateQuota, takeGenerateQuota } from "@/server/quota";
 import { putStudyPlan } from "@/server/studyPlan";
+import { metered, planFor } from "@/server/spend";
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const requestSchema = z.object({
@@ -21,7 +21,7 @@ const requestSchema = z.object({
 });
 
 /** Makes a study plan from uploaded material and replaces the account's plan with it. */
-export async function POST(request: Request) {
+export const POST = metered(async (request: Request) => {
   const user = await requireUser();
   if (user instanceof Response) return user;
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   const { outline, focus, today, examDate, hoursPerDay, daysPerWeek } = parsed.data;
   if (examDate <= today) return Response.json({ error: "Das Prüfungsdatum muss in der Zukunft liegen." }, { status: 400 });
 
-  const plan = planOf(user);
+  const plan = await planFor(user);
   if ((await takeGenerateQuota(getDb(), user.id, plan)) === null) {
     return Response.json({ error: "Das Tageslimit für KI-Anfragen ist erreicht. Morgen geht es weiter." }, { status: 429 });
   }
@@ -44,4 +44,4 @@ export async function POST(request: Request) {
     await refundGenerateQuota(getDb(), user.id);
     return errorResponse(error);
   }
-}
+});

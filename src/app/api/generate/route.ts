@@ -6,6 +6,7 @@ import { currentUser, planOrDeny, SERVER_MODE } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { generateCards } from "@/server/generate";
 import { refundGenerateQuota, takeGenerateQuota } from "@/server/quota";
+import { metered } from "@/server/spend";
 
 const requestSchema = z.object({
   text: z.string().trim().min(1).max(GENERATE_CHUNK_CHARS + 2000),
@@ -13,7 +14,7 @@ const requestSchema = z.object({
   mode: z.enum(GENERATE_MODES).default("auto"),
 });
 
-export async function POST(request: Request) {
+export const POST = metered(async (request: Request) => {
   const plan = await planOrDeny();
   if (plan instanceof Response) return plan;
 
@@ -42,4 +43,4 @@ export async function POST(request: Request) {
     if (user) await refundGenerateQuota(getDb(), user.id);
     return errorResponse(error);
   }
-}
+});

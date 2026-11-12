@@ -3,6 +3,7 @@ import { errorResponse, FREE_PLAN_GRADING_MODELS } from "@/lib/ai";
 import { refundAi, takeAi } from "@/server/aiQuota";
 import { planOrDeny } from "@/server/auth";
 import { explainGaps } from "@/server/explain";
+import { metered } from "@/server/spend";
 
 const requestSchema = z.object({
   question: z.string().max(20_000),
@@ -13,7 +14,7 @@ const requestSchema = z.object({
     .max(2000),
 });
 
-export async function POST(request: Request) {
+export const POST = metered(async (request: Request) => {
   const plan = await planOrDeny();
   if (plan instanceof Response) return plan;
 
@@ -32,4 +33,4 @@ export async function POST(request: Request) {
     await refundAi(allowance);
     return errorResponse(error);
   }
-}
+});

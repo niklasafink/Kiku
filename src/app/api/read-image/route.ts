@@ -3,13 +3,14 @@ import { currentUser, planOrDeny, SERVER_MODE } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { refundQuota, takeQuota } from "@/server/quota";
 import { readImageText, type ImageKind } from "@/server/readImage";
+import { metered } from "@/server/spend";
 
 // The browser scales pictures down before sending; this stays below typical 4.5 MB body limits.
 const MAX_BYTES = 4_000_000;
 const TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 /** Reads the text in a picture: ?kind=handwriting for a written answer, ?kind=document for a page of material. */
-export async function POST(request: Request) {
+export const POST = metered(async (request: Request) => {
   const plan = await planOrDeny();
   if (plan instanceof Response) return plan;
 
@@ -40,4 +41,4 @@ export async function POST(request: Request) {
     if (user) await refundQuota(getDb(), "image", user.id);
     return errorResponse(error);
   }
-}
+});

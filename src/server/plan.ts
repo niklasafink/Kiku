@@ -5,11 +5,28 @@ export type LimitedPlan = Exclude<Plan, "admin">;
 
 // There is no billing yet: an account is paid when its e-mail address is listed (comma-separated).
 // ADMIN_EMAILS names whoever runs the app; it is not a plan anyone can get.
-const emails = (list: string | undefined) =>
-  new Set((list ?? "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean));
+// An entry of PAID_EMAILS may name a budget after a colon, in US dollars per calendar month as OpenRouter
+// bills them: "a@example.com:5". A budget that is no number counts as none left.
+const entries = (list: string | undefined) =>
+  new Map(
+    (list ?? "")
+      .split(",")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean)
+      .map((entry): [string, number | null] => {
+        const [email, budget] = entry.split(":");
+        const usd = Number(budget);
+        return [email.trim(), budget === undefined ? null : Number.isFinite(usd) ? usd : 0];
+      }),
+  );
 
 export function planOf(user: { email: string }): Plan {
   const email = user.email.toLowerCase();
-  if (emails(process.env.ADMIN_EMAILS).has(email)) return "admin";
-  return emails(process.env.PAID_EMAILS).has(email) ? "paid" : "free";
+  if (entries(process.env.ADMIN_EMAILS).has(email)) return "admin";
+  return entries(process.env.PAID_EMAILS).has(email) ? "paid" : "free";
+}
+
+/** What a paid account may cost per calendar month in US dollars, or null without a budget. See `planFor`. */
+export function budgetOf(user: { email: string }): number | null {
+  return entries(process.env.PAID_EMAILS).get(user.email.toLowerCase()) ?? null;
 }
