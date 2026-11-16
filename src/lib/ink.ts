@@ -227,6 +227,19 @@ export function inkBottom(strokes: Stroke[]): number {
 }
 
 /**
+ * The part of a sheet that is seen through its window, in the sheet's own units: from `top` to
+ * `bottom`. Its length is the same wherever the sheet is scrolled to. A retina screen scrolls in
+ * half pixels, and rounding the two ends on their own made the part a pixel longer at every other
+ * position; the layer above the writing was then sized anew, which for a canvas means made anew,
+ * again and again while the sheet moved.
+ */
+export function sheetView(sheetTop: number, viewTop: number, viewBottom: number, sheetHeight: number): { top: number; bottom: number } {
+  const length = Math.min(sheetHeight, Math.ceil(viewBottom - viewTop) + 1);
+  const top = Math.max(0, Math.min(sheetHeight - length, Math.floor(viewTop - sheetTop)));
+  return { top, bottom: top + length };
+}
+
+/**
  * A stroke as it is stored: its points as one run of numbers (x, y and pressure of each), which is
  * copied far faster than an object per point. A session of several pages has tens of thousands.
  */

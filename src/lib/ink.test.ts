@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boxOf, eraserHits, hasInk, inkBottom, movedStroke, packStroke, strokesInLoop, unpackStroke, type Stroke } from "./ink";
+import { boxOf, eraserHits, hasInk, inkBottom, movedStroke, packStroke, sheetView, strokesInLoop, unpackStroke, type Stroke } from "./ink";
 
 const line = (x1: number, y1: number, x2: number, y2: number, extra: Partial<Stroke> = {}): Stroke => ({
   points: [
@@ -74,5 +74,33 @@ describe("stored strokes", () => {
 
   it("know the lowest point written on", () => {
     expect(inkBottom([line(0, 0, 10, 80), line(0, 500, 10, 900, { erase: true }), line(0, 0, 10, 120)])).toBe(120);
+  });
+});
+
+describe("sheetView", () => {
+  // A window 666.72 high (as flex layouts give) on a sheet of 1600, 100 below the top of the screen.
+  const view = (scrolled: number) => sheetView(100 - scrolled, 100, 766.72, 1600);
+
+  it("has the same length at every scroll position, also at half pixels", () => {
+    const lengths = new Set<number>();
+    for (let scrolled = 0; scrolled <= 1600 - 666.72; scrolled += 0.5) {
+      const { top, bottom } = view(scrolled);
+      lengths.add(bottom - top);
+    }
+    expect([...lengths]).toEqual([668]);
+  });
+
+  it("covers what is in view and stays on the sheet", () => {
+    for (let scrolled = 0; scrolled <= 1600 - 666.72; scrolled += 0.5) {
+      const { top, bottom } = view(scrolled);
+      expect(top).toBeGreaterThanOrEqual(0);
+      expect(bottom).toBeLessThanOrEqual(1600);
+      expect(top).toBeLessThanOrEqual(scrolled);
+      expect(bottom).toBeGreaterThanOrEqual(Math.min(1600, scrolled + 666.72));
+    }
+  });
+
+  it("is the whole sheet when the window is taller than the sheet", () => {
+    expect(sheetView(100, 100, 900, 500)).toEqual({ top: 0, bottom: 500 });
   });
 });
