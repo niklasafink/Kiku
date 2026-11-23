@@ -5,7 +5,6 @@ import { Eraser, Highlighter, Lasso, PenLine, Redo2, Slash, Trash2, Undo2, type 
 import {
   boxOf,
   drawInk,
-  drawInkTail,
   drawStroke,
   drawStrokes,
   eraserHits,
@@ -324,8 +323,6 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   const painted = useRef<Stroke[] | null>(null);
   // The part of the upper layer that is painted on.
   const liveBox = useRef<Box>(NOTHING);
-  // How much of the stroke in the making is already on the upper layer: only the rest is painted per frame.
-  const liveDone = useRef<{ stroke: Stroke; count: number } | null>(null);
   const strokesRef = useRef(strokes);
   // The strokes last given by the owner, and the sheets handed to it that it has not given back yet,
   // oldest first. A finished stroke reaches the owner a little later (see finish), and the owner may
@@ -377,25 +374,6 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
       const live = liveRef.current;
       if (!live || live.width === 0) return;
       const context = liveContext();
-      const pen = gesture.current;
-      if (pen?.kind === "draw" && !pen.stroke.highlight && !pen.straight) {
-        // Add to what is there instead of painting the whole stroke anew every frame.
-        const { stroke } = pen;
-        const done = liveDone.current?.stroke === stroke ? liveDone.current.count : 0;
-        if (done === 0) {
-          const before = liveBox.current;
-          if (before.right >= before.left) context.clearRect(before.left - WIPE, before.top - WIPE, before.right - before.left + WIPE * 2, before.bottom - before.top + WIPE * 2);
-          liveBox.current = NOTHING;
-        }
-        const count = stroke.points.length;
-        if (count > done) {
-          drawInkTail(context, stroke.points, done, INK);
-          liveBox.current = joinBoxes(liveBox.current, boxOf([{ points: stroke.points.slice(Math.max(0, done - 2)) }]));
-          liveDone.current = { stroke, count };
-        }
-        return;
-      }
-      liveDone.current = null;
       const old = liveBox.current;
       if (old.right >= old.left) context.clearRect(old.left - WIPE, old.top - WIPE, old.right - old.left + WIPE * 2, old.bottom - old.top + WIPE * 2);
       liveBox.current = NOTHING;
@@ -466,7 +444,6 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
       context.clearRect(0, 0, width, height);
     } else return;
     liveTop.current = top;
-    liveDone.current = null;
     live.style.top = `${top}px`;
     live.style.height = `${bottom - top}px`;
     liveBox.current = NOTHING;
