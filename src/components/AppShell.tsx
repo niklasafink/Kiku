@@ -394,6 +394,12 @@ function Shell({ children }: { children: ReactNode }) {
                 <StreakBadge />
               </Link>
             </li>
+            <li>
+              <Link href="/uebersicht" onClick={close} className={pathname === "/uebersicht" ? "menu-active" : ""}>
+                <FileText className="size-5" />
+                Karten-Übersicht
+              </Link>
+            </li>
             {account.mode === "server" && account.user && (
               <li>
                 <Link href="/plan" onClick={close} className={pathname === "/plan" ? "menu-active" : ""}>
