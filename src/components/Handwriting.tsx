@@ -10,6 +10,7 @@ import {
   eraserHits,
   inkBottom,
   movedStroke,
+  sheetView,
   strokeBox,
   strokesInLoop,
   type Box,
@@ -99,6 +100,14 @@ interface Moving extends Touching {
   at: { x: number; y: number };
 }
 type Gesture = Drawing | Erasing | Looping | Moving;
+
+/**
+ * Only with ?stiftdebug in the address: what the pen and the sheet did in the last second, shown at
+ * the bottom of the screen for a screenshot when writing lags on a device. Counted for all sheets on the page.
+ */
+const DEBUG = typeof location !== "undefined" && location.search.includes("stiftdebug");
+const fresh = () => ({ moves: 0, samples: 0, delay: 0, handler: 0, paints: 0, paint: 0, frame: 0, views: 0 });
+const debug = { ...fresh(), cancels: 0, lostLifts: 0, sized: 0, bands: 0, lastFrame: 0 };
 
 const NOTHING: Box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
 
@@ -217,20 +226,24 @@ function bandContext(bands: Bands, index: number, tile: HTMLCanvasElement) {
 
 function paintBand(bands: Bands, index: number, tile: HTMLCanvasElement, strokes: Stroke[]) {
   const context = bandContext(bands, index, tile);
+  debug.bands++;
   context.clearRect(0, index * bands.band, bands.width, bands.band);
   drawStrokes(context, strokes.filter((stroke) => inBand(bands, strokeBox(stroke), index)), INK);
 }
 
+function freeBand(bands: Bands, index: number) {
+  const tile = bands.tiles.get(index);
+  if (!tile) return;
+  // Safari holds on to the memory of a canvas until its size is zero.
+  tile.width = 0;
+  tile.height = 0;
+  tile.remove();
+  bands.tiles.delete(index);
+}
+
 /** Keeps the bands from `first` to `last`, the new ones painted with `strokes`, and frees the others. */
 function placeBands(bands: Bands, first: number, last: number, strokes: Stroke[]) {
-  for (const [index, tile] of bands.tiles) {
-    if (index >= first && index <= last) continue;
-    // Safari holds on to the memory of a canvas until its size is zero.
-    tile.width = 0;
-    tile.height = 0;
-    tile.remove();
-    bands.tiles.delete(index);
-  }
+  for (const index of bands.tiles.keys()) if (index < first || index > last) freeBand(bands, index);
   for (let index = first; index <= last; index++) {
     if (bands.tiles.has(index)) continue;
     const top = index * bands.band;
@@ -370,9 +383,16 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
   /** Paints what is in the making on the upper layer, at most once per frame of the screen. */
   const paintLive = useCallback(() => {
     cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(() => {
+    frame.current = requestAnimationFrame((now) => {
       const live = liveRef.current;
       if (!live || live.width === 0) return;
+      if (DEBUG) {
+        // The longest wait between two paintings of a stroke, and how long the painting itself takes.
+        if (gesture.current && debug.lastFrame) debug.frame = Math.max(debug.frame, now - debug.lastFrame);
+        debug.lastFrame = gesture.current ? now : 0;
+        debug.paints++;
+        queueMicrotask(() => (debug.paint = Math.max(debug.paint, performance.now() - now)));
+      }
       const context = liveContext();
       const old = liveBox.current;
       if (old.right >= old.left) context.clearRect(old.left - WIPE, old.top - WIPE, old.right - old.left + WIPE * 2, old.bottom - old.top + WIPE * 2);
@@ -425,8 +445,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
       const sheet = surface.getBoundingClientRect();
       const scroller = scrollerOf(surface);
       const view = scroller instanceof Element ? scroller.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
-      top = Math.min(layer.height - 1, Math.max(0, Math.floor(Math.max(0, view.top) - sheet.top)));
-      bottom = Math.min(layer.height, Math.max(top + 1, Math.ceil(Math.min(window.innerHeight, view.bottom) - sheet.top)));
+      ({ top, bottom } = sheetView(sheet.top, Math.max(0, view.top), Math.max(1, Math.min(window.innerHeight, view.bottom)), layer.height));
     }
     const first = Math.max(0, Math.floor(top / layer.band) - OVERSCAN);
     const last = Math.min(Math.ceil(layer.height / layer.band) - 1, Math.floor(bottom / layer.band) + OVERSCAN);
@@ -434,7 +453,9 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
 
     const width = Math.round(layer.width * layer.ratio);
     const height = Math.max(1, Math.round((bottom - top) * layer.ratio));
+    debug.views++;
     if (live.width !== width || live.height !== height) {
+      debug.sized++;
       // A new size also empties the canvas.
       live.width = width;
       live.height = height;
@@ -465,6 +486,18 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
         painted.current = shown;
       }
       return false;
+    }
+    if (old && !onPage && old.width === width && old.ratio === ratio && height > old.height) {
+      // The sheet only got longer, as it does every few lines of writing: the bands stay as they
+      // are. Setting all of them up anew held up the pen in the middle of a word. Only the last
+      // band, cut off where the sheet used to end, is made anew (by placeView).
+      if (old.height % old.band !== 0) freeBand(old, Math.ceil(old.height / old.band) - 1);
+      old.height = height;
+      if (painted.current !== shown) {
+        paintBase(shown);
+        painted.current = shown;
+      }
+      return true;
     }
     if (old) placeBands(old, 0, -1, []);
     bands.current = { holder, tiles: new Map(), width, height, band: onPage ? height : BAND, ratio, blend: onPage };
@@ -520,6 +553,42 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     },
     [],
   );
+
+  // When something scrolls, the sheet lies elsewhere on the screen: it is measured anew for the next
+  // movement, so a stroke stays under the pen when the resting hand moves the sheet a little.
+  useEffect(() => {
+    const moved = () => {
+      rect.current = null;
+    };
+    window.addEventListener("scroll", moved, { capture: true, passive: true });
+    return () => window.removeEventListener("scroll", moved, { capture: true });
+  }, []);
+
+  useEffect(() => {
+    if (!DEBUG || onPage) return;
+    const readout = document.createElement("pre");
+    readout.style.cssText =
+      "position:fixed;left:8px;bottom:8px;z-index:9999;margin:0;padding:6px 8px;font:11px/1.35 ui-monospace,monospace;background:#000c;color:#fff;border-radius:6px;pointer-events:none;white-space:pre";
+    document.body.append(readout);
+    const ms = (value: number) => `${Math.round(value)} ms`;
+    const timer = setInterval(() => {
+      const canvases = Array.from(document.querySelectorAll("canvas"));
+      const megapixels = canvases.reduce((sum, canvas) => sum + canvas.width * canvas.height, 0) / 1e6;
+      readout.textContent = [
+        `Stift: ${debug.moves} Ereignisse/s, ${debug.samples} Punkte/s`,
+        `Wartezeit max ${ms(debug.delay)}, Verarbeitung max ${ms(debug.handler)}`,
+        `Zeichnen: ${debug.paints}/s, max ${ms(debug.paint)}, Bildabstand max ${ms(debug.frame)}`,
+        `Blatt: ${debug.views} Ausschnitte/s, Ebene neu angelegt ${debug.sized}x, Bänder gemalt ${debug.bands}x`,
+        `Abbrüche ${debug.cancels}, verlorene Enden ${debug.lostLifts}, Striche ${strokesRef.current.length}`,
+        `Canvas: ${canvases.length} Stück, ${megapixels.toFixed(1)} MP`,
+      ].join("\n");
+      Object.assign(debug, fresh());
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+      readout.remove();
+    };
+  }, [onPage]);
 
   // iPadOS takes a pen that moves over a page for one of its own gestures (scrolling, Scribble,
   // selecting text, the magnifier) and then ends the stroke halfway. Refusing the touch keeps
@@ -712,7 +781,10 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     }
     if (active) {
       // A pen that comes down while its last stroke is still open: the lift got lost. Keep what was written.
-      if (type === "pen" && active.type === "pen") finish(active);
+      if (type === "pen" && active.type === "pen") {
+        debug.lostLifts++;
+        finish(active);
+      }
       // The pen wins over everything else: a palm that was taken for a stroke is dropped.
       else if (type === "pen") discard(active);
       else if (type === "touch" && active.type === "touch") {
@@ -811,6 +883,14 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     if (!active || active.pointerId !== event.pointerId) return;
     active.time = event.timeStamp;
     const points = pointsOf(event);
+    if (DEBUG) {
+      debug.moves++;
+      debug.samples += points.length;
+      // How long the movement waited before the page got to it.
+      debug.delay = Math.max(debug.delay, performance.now() - event.timeStamp);
+      const began = performance.now();
+      queueMicrotask(() => (debug.handler = Math.max(debug.handler, performance.now() - began)));
+    }
     const last = points[points.length - 1];
     if (active.kind === "erase") {
       for (const point of points) erase(active, point);
@@ -863,6 +943,7 @@ export function InkSurface({ strokes, onChange, tool, disabled, page, onSelectio
     }
     const active = gesture.current;
     if (!active || active.pointerId !== event.pointerId) return;
+    if (event.type === "pointercancel") debug.cancels++;
     const start = down.current;
     const tapped =
       event.type === "pointerup" &&
