@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
 import { ArrowLeft, ArrowRight, BookOpen, Check, ClipboardCheck, ClipboardList, CloudOff, FileCheck, GraduationCap, Headphones, Keyboard, Lightbulb, Mic, Pencil, PenLine, RotateCcw, Shuffle, Upload, X } from "lucide-react";
 import { useAccount } from "@/components/Account";
 import { GradedPdf, prefetchPdfText } from "@/components/GradedPdf";
@@ -209,10 +209,10 @@ export function StudySession({
   });
 
   /** Markings made on a PDF or in the text while practising stay on the card, as if it had been edited. */
-  const saveSide = useCallback((cardId: string, side: "question" | "solution", text: string) => {
+  function saveSide(cardId: string, side: "question" | "solution", text: string) {
     setCards((all) => all.map((c) => (c.id === cardId ? { ...c, [side]: text } : c)));
     void updateCard(cardId, { [side]: text });
-  }, []);
+  }
 
   /**
    * A solution that is only a PDF gets its text now: cards made while reading PDFs failed on a
@@ -952,7 +952,7 @@ export function StudySession({
   );
   // During an exam the solution stays hidden until it is handed in.
   const solutionTab = handedIn
-    ? [{ id: "solution", label: "Lösung", Icon: BookOpen, node: <CardSide key={card.id} cardId={card.id} side="solution" text={card.solution} onSave={saveSide} /> }]
+    ? [{ id: "solution", label: "Lösung", Icon: BookOpen, node: <SideView key={card.id} text={card.solution} onChange={(text) => saveSide(card.id, "solution", text)} /> }]
     : [];
   // Task and solution left, answer and solution right, each side with tabs; PDFs and text can be marked on both.
   return (
@@ -966,7 +966,7 @@ export function StudySession({
             id: "task",
             label: "Aufgabe",
             Icon: ClipboardList,
-            node: <CardSide key={card.id} cardId={card.id} side="question" text={card.question} onSave={saveSide} />,
+            node: <SideView key={card.id} text={card.question} onChange={(text) => saveSide(card.id, "question", text)} />,
           },
           ...solutionTab,
         ]}
@@ -989,26 +989,6 @@ export function StudySession({
     </div>
   );
 }
-
-/**
- * The task or the solution of a card, to read and to mark. It is set anew only when its text
- * changes: the session around it changes with every stroke and letter of the answer, and setting
- * a long text or a PDF again each time held up the pen.
- */
-const CardSide = memo(function CardSide({
-  cardId,
-  side,
-  text,
-  onSave,
-}: {
-  cardId: string;
-  side: "question" | "solution";
-  text: string;
-  /** Must stay the same function from one render to the next. */
-  onSave: (cardId: string, side: "question" | "solution", text: string) => void;
-}) {
-  return <SideView text={text} onChange={(next) => onSave(cardId, side, next)} />;
-});
 
 /** The answer as a sheet of paper on a desk, like a page in a word processor. */
 function PaperSheet({
