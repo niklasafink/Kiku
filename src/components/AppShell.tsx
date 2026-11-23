@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { CalendarCheck, ChartNoAxesColumn, ChevronRight, CloudAlert, CloudCheck, Crown, FileText, Flame, House, Library, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings } from "lucide-react";
+import { CalendarCheck, ChartNoAxesColumn, ChevronRight, CloudAlert, CloudCheck, Crown, Flame, House, Library, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings } from "lucide-react";
 import { AccountProvider, useAccount, useSyncState } from "@/components/Account";
 import { trackActiveTime } from "@/lib/activeTime";
 import { useAttemptLog, useFolders } from "@/lib/hooks";
