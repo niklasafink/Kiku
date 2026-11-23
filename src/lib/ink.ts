@@ -78,6 +78,47 @@ export function drawInk(context: CanvasRenderingContext2D, points: InkPoint[], c
   context.restore();
 }
 
+/**
+ * Paints only what was added to a stroke in the making: the pieces from point `from` on, each as a
+ * curve through the midpoints, as wide as the pressure. Cost grows with the new points, not with the
+ * length of the stroke, so the line keeps up with the pen however long it gets. The shape is
+ * replaced by the full outline (strokeOutline) when the pen lifts.
+ */
+export function drawInkTail(context: CanvasRenderingContext2D, points: InkPoint[], from: number, color: string): void {
+  const n = points.length;
+  if (n === 0) return;
+  const width = (point: InkPoint) => PEN_WIDTH * (0.5 + Math.min(1, Math.max(0.15, point.pressure)));
+  const mid = (a: InkPoint, b: InkPoint) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  context.save();
+  context.strokeStyle = color;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  if (n === 1) {
+    context.lineWidth = width(points[0]);
+    context.beginPath();
+    context.moveTo(points[0].x, points[0].y);
+    context.lineTo(points[0].x, points[0].y);
+    context.stroke();
+  }
+  for (let j = Math.max(1, from); j < n; j++) {
+    context.lineWidth = width(points[j]);
+    context.beginPath();
+    if (j === 1) {
+      const m = mid(points[0], points[1]);
+      context.moveTo(points[0].x, points[0].y);
+      context.lineTo(m.x, m.y);
+    } else {
+      const a = mid(points[j - 2], points[j - 1]);
+      const b = mid(points[j - 1], points[j]);
+      context.moveTo(a.x, a.y);
+      context.quadraticCurveTo(points[j - 1].x, points[j - 1].y, b.x, b.y);
+    }
+    context.lineTo(points[j].x, points[j].y);
+    context.stroke();
+  }
+  context.restore();
+}
+
 /** One line of even width through the points: the marker, and the rubbing out of older answers. */
 function drawBand(context: CanvasRenderingContext2D, points: InkPoint[], width: number, color: string, rubOut = false): void {
   context.save();
